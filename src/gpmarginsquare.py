@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import copy
+import functools
 import itertools
 
 import numpy as np
@@ -189,22 +190,26 @@ def _calculate_weights_term(phisamples,positives,
         prior_means = prior_means*np.ones(n)
     # Multivariate normal used in caln
     # TODO: change for more efficient manner
-    wvec = gp_length_scales**2
-    C = utilsla.block([[np.diag(prior_variances + wvec),np.diag(wvec)],
-                       [np.diag(wvec),np.diag(prior_variances + wvec)]])
-    mvn = spstats.multivariate_normal(mean = np.hstack([prior_means]*2),
-                                      cov=C)
-    def k(phi_i,phi_j):
-        return utils.sqexp(phi_i,phi_j,gp_length_scales)
-    def caln(phi_i,phi_j):
-        return mvn.pdf(np.hstack([phi_i,phi_j]))
-    K = utils.binary_function_matrix(k,phisamplestr)
+    l2 = gp_length_scales**2
+    kfunc = functools.partial(utils.sqexp,l=gp_length_scales)
+    wfunc = functools.partial(_make_wij,l2=l2,
+                              lambd2 = prior_variances,
+                              nu = prior_means)
+    K = utils.binary_function_matrix(kfunc,phisamplestr)
     K = K + np.identity(K.shape[0])*jitter
     U = utilsla.spla.cholesky(K,lower=False)
     invK = utilsla.inverse_cholesky_upper(U)
-    W = utils.binary_function_matrix(caln,phisamplestr)
+    W = utils.binary_function_matrix(wfunc,phisamplestr)
     M = np.matmul(invK,np.matmul(W,invK))
     return M
+
+
+def _make_wij(phi_i,phi_j,l2,lambd2,nu):
+    V2 = 1.0/(2/l2 + 1/lambd2)
+    C = (phi_i + phi_j)/l2 + nu**2/lambd2 - \
+         1.0/(2/l2 + 1/lambd2)*((phi_i + phi_j)/l2 + nu/lambd2)
+    mij = np.prod(np.sqrt(V2/lambd2)*np.exp(-0.5*C))
+    return mij
 
 
 def _combine_predictions_single(weights_term,
