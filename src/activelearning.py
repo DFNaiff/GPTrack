@@ -18,9 +18,10 @@ def choose_next_gptrack(gptrack,t0,t1,
     """
         Choose next measurement point for GPTrack
     """
-    loglikelihoods = np.array([gp.loglikelihood for gp in gptrack.gplist])
+    loglikelihoods = np.array([gp.loglikelihood 
+                               for gp in gptrack.gpmargin.gplist])
     ind = np.argmax(loglikelihoods)
-    gpi = gptrack.gplist[ind] #GP with largest likelihood, used for estimation
+    gpi = gptrack.gpmargin.gplist[ind] #GP with largest likelihood, used for estimation
     return choose_next_mo(gpi,t0,t1,max_error,confidence)
 
 

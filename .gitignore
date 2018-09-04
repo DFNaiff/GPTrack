@@ -1,0 +1,6 @@
+oldsrc/
+test_informal/
+*.pyc
+GPTrack.zip
+src.zip
+__pycache__/

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 
-from . import gpmarginsquare
+from . import gpmargingrid
 from . import utils
 
 #
@@ -16,7 +16,7 @@ from . import utils
 #==============================================================================
 # MAIN CLASS
 #==============================================================================
-class GPTrackSquare(object):
+class GPTrackGrid(object):
     def __init__(self,kernel,phisamples,positives,data,
                       prior_variances = 1.0,gp_length_scales = 1.0,
                       noisekernel = "DEFAULT",
@@ -29,9 +29,9 @@ class GPTrackSquare(object):
                      an SphericalCorr kernel and another kernel
             noisekernel : kernel for the noise. If "DEFAULT", 
                           IIDKernel is chosen
-            phisamples : list of samples for each hyperparameters,
-                         [phi_1,...,phi_n],
-                         with phi_i = [phi_i^(1),...,phi_i^(n)]
+            phisamples : list of samples for each hyperparameter dimension, 
+                         [[phi_1^(1),...,phi_1^(m_1)],...,
+                          [phi_n^(1),...,phi_n^(m_n)]]
                          where n = kernel.nhyper + noisekernel.nhyper
             positives : [bool]*n list of positives hyperparameters
             data : data supplied to GP. If supplied, has to be of the form
@@ -51,7 +51,7 @@ class GPTrackSquare(object):
         self.nout = kernel.k1.nout #Number of outputs
         self.ndata,self.ndataout,self.datalocation = \
             _count_data(self.nout,self.xdata)
-        self.gpmargin = gpmarginsquare.GPMarginSquare(kernel,phisamples,positives,
+        self.gpmargin = gpmargingrid.GPMarginGrid(kernel,phisamples,positives,
                                         prior_variances=prior_variances,
                                         gp_length_scales=gp_length_scales,
                                         noisekernel=noisekernel,
@@ -80,6 +80,7 @@ class GPTrackSquare(object):
             # Upgrades the GPs, revising covariance matrix,
             # data-dependent term and likelihoods to allow for added data
             self.gpmargin.gplist[i].update_batch([x_t,z_t])
+        self.gpmargin._determine_weights_vector()
         if self.verbose >= 1:
             print("ndata: %i",self.ndata)
         return
