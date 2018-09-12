@@ -142,11 +142,8 @@ class GPMarginSquare(object):
     #Initialization functons
     def _set_gps(self,data):
         self.gplist = [None]*self.eta
-        print(self.phisamples)
         for i,phisample in enumerate(self.phisamples):
             phisample = np.array(phisample)
-            if i > 10:
-                raise KeyError
             # Supply ith gaussian process with the mean function meanfunc 
             # and covariance function cov func
             self.gplist[i] = gpobject.GPObject(self.kernel,self.noisekernel,
@@ -188,13 +185,15 @@ def _calculate_weights_term(phisamples,positives,
         prior_variances = prior_variances*np.ones(n)
     if type(prior_means) != np.ndarray: # A scalar was supplied
         prior_means = prior_means*np.ones(n)
-    # Multivariate normal used in caln
+    # Multivariate normal used for W
     # TODO: change for more efficient manner
     l2 = gp_length_scales**2
+    C = utilsla.block([[np.diag(prior_variances + l2),np.diag(prior_variances)],
+                       [np.diag(prior_variances),np.diag(prior_variances + l2)]])
+    mvn = spstats.multivariate_normal(mean = np.hstack([prior_means]*2),
+                                      cov=C)
+    wfunc = lambda phi_i,phi_j : mvn.pdf(np.hstack([phi_i,phi_j]))
     kfunc = functools.partial(utils.sqexp,l=gp_length_scales)
-    wfunc = functools.partial(_make_wij,l2=l2,
-                              lambd2 = prior_variances,
-                              nu = prior_means)
     K = utils.binary_function_matrix(kfunc,phisamplestr)
     K = K + np.identity(K.shape[0])*jitter
     U = utilsla.spla.cholesky(K,lower=False)
@@ -204,7 +203,7 @@ def _calculate_weights_term(phisamples,positives,
     return M
 
 
-def _make_wij(phi_i,phi_j,l2,lambd2,nu):
+def _make_wij(phi_i,phi_j,l2,lambd2,nu): #TODO : Check again
     V2 = 1.0/(2/l2 + 1/lambd2)
     C = (phi_i + phi_j)/l2 + nu**2/lambd2 - \
          1.0/(2/l2 + 1/lambd2)*((phi_i + phi_j)/l2 + nu/lambd2)
@@ -270,7 +269,7 @@ def _combine_predictions_batch(weights_term,
 
 def _make_weight(mi,mj,covi,covj,li,lj,Mij):
     C = (utilsla.spla.det(covi)*utilsla.spla.det(covj))**(0.25)
-    D = np.sqrt(utilsla.spla.det(covi) + utilsla.spla.det(covj))*\
+    D = 1.0/np.sqrt(utilsla.spla.det(covi) + utilsla.spla.det(covj))*\
         np.exp(-0.5*utilsla.bilinear_form(mi - mj,
                                           utilsla.spla.inv(covi + covj),
                                           mi - mj))
@@ -289,3 +288,61 @@ def _get_prior_means(phisamples,positives):
             prior_means[i] = spstats.mstats.gmean(phisample)
     prior_means[positives] = np.log(prior_means[positives])
     return prior_means
+
+#==============================================================================
+# DEPECRATED FOR NOW 
+#==============================================================================
+def _calculate_weights_term_old(phisamples,positives,
+                            gp_length_scales=1.0,
+                            prior_means=0.0,prior_variances=20.0,
+                            jitter = 1e-6):
+    #TODO : Check whether Osborne's weight calculation is correct.
+    #       To elaborate: The integral you've calculated should
+    #       be the same as his. But maybe he's wrong (or it should 
+    #       not be the same)
+    """
+        Calculates the weight term matrix without grid 
+        phisamples : [phi_1,...,phi_eta] list of hyperparameters samples,
+                     where phi_i = [phi_i^1,...,phi_i^n]
+        prior_variances : a (positive) scalar (LATER: also arrays)
+        gp_length_scales : a (positive) scalar (LATER: also arrays)
+        positives : [bool]*n list of parameters that are positive
+        prior_means : a scalar or n-sized array
+        returns a m_1*...*m_n sized square matrix
+    """
+    eta = len(phisamples)
+    n = len(phisamples[0])
+    phisamplestr = [None]*eta
+    for i,phisample in enumerate(phisamples):
+        # Apply log to positive hyperparameters
+        phisampletr = phisample.copy()
+        phisampletr[positives] = np.log(phisample[positives])
+        phisamplestr[i] = phisampletr
+    if type(gp_length_scales) != np.ndarray: # A scalar was supplied
+        gp_length_scales = gp_length_scales*np.ones(n)
+    if type(prior_variances) != np.ndarray: # A scalar was supplied
+        prior_variances = prior_variances*np.ones(n)
+    if type(prior_means) != np.ndarray: # A scalar was supplied
+        prior_means = prior_means*np.ones(n)
+    # Multivariate normal used in caln
+    # TODO: change for more efficient manner
+    l2 = gp_length_scales**2
+    kfunc = functools.partial(utils.sqexp,l=gp_length_scales)
+    wfunc = functools.partial(_make_wij,l2=l2,
+                              lambd2 = prior_variances,
+                              nu = prior_means)
+    K = utils.binary_function_matrix(kfunc,phisamplestr)
+    K = K + np.identity(K.shape[0])*jitter
+    U = utilsla.spla.cholesky(K,lower=False)
+    invK = utilsla.inverse_cholesky_upper(U)
+    W = utils.binary_function_matrix(wfunc,phisamplestr)
+    M = np.matmul(invK,np.matmul(W,invK))
+    return M
+
+
+def _make_wij(phi_i,phi_j,l2,lambd2,nu): #TODO : Check again
+    V2 = 1.0/(2/l2 + 1/lambd2)
+    C = (phi_i + phi_j)/l2 + nu**2/lambd2 - \
+         1.0/(2/l2 + 1/lambd2)*((phi_i + phi_j)/l2 + nu/lambd2)
+    mij = np.prod(np.sqrt(V2/lambd2)*np.exp(-0.5*C))
+    return mij

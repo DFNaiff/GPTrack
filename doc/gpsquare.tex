@@ -110,9 +110,10 @@
  \begin{equation}
  \begin{split}
   & W_{i,j} = h^2 \prod_{k=1}^{d} \Big( \frac{V_k^2}{\lambda_k^2} \Big)^{1/2} \exp \Big(-\frac{1}{2} C_k \Big) \\
-  & V_k^2 = (2 l_k^{-2} + \lambda_k^{-2})^{-1} \\
-  & C_k = l_k^{-2} ((\phi_i^{(k)})^2 + (\phi_j^{(k)})^2) + \lambda_k^{-2}\nu_k^2 
-    - (2 l_k^{-2} + \lambda_k^{-2})^{-1} (l_k^{-2} ((\phi_i^{(k)}) + (\phi_j^{(k)})) + \lambda_k^{-2}\nu_k)^2
+  & V_k^2 = \left( \frac{2}{l_k^2} + \frac{1}{\lambda_k^2} \right)^{-1} \\
+  & C_k = \frac{(\phi_i^{(k)})^2 + (\phi_j^{(k)})^2}{l_k^2} + \frac{\nu_k^2}{\lambda_k^2} 
+    - \left(\frac{2}{l_k^2} + \frac{1}{\lambda_k^2} \right)^{-1} 
+    \left(\frac{\phi_i^{(k)} + \phi_j^{(k)}}{l_k^2} + \frac{\nu_k}{\lambda_k^{2}} \right)^2
  \end{split}
  \end{equation}
 \end{document}

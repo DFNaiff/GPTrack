@@ -81,14 +81,24 @@ def choose_next_mo(gp,t0,t1,
         tdatab = [[i,t] for t in tdata]
         #Preparing GP        
         zdata = np.diag(gp.predict_batch(tdatab)[1]) #Measured covs
+        print(tdata)
+        print(tdatab)
+        print(gp.predict_batch)
+        print(zdata)
         choicekernel = kernels.Constant()*kernels.IsoRBF(dim=1)
         choicenoisekernel = kernels.IIDNoiseKernel()
         print(i,'ok')
         gpchoice = gpobject.GPObject(choicekernel,choicenoisekernel,
                     np.array([1.0,1.0,1e-6]),[tdata,zdata])
-        gpchoice = gpchoice.optimize([True,True,True],[True,True,False],
-                                     [None,None,"log"],verbose=0)
+        try:
+            gpchoice = gpchoice.optimize([True,True,True],[True,True,False],
+                                         [None,None,"log"],verbose=0)
+        except:
+            print("Error in GP optimization on active learning")
         #Calculating t
+        print(f(tb))
+        print(f(ta))
+        print("startingbrentq")
         try:
             tnewi = brentq(f,ta,tb)
         except:
