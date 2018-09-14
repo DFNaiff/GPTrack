@@ -1,1 +1,1 @@
-from .src import gptrack,kernels,choosesamples,activelearning,gptracksquare
+from .src import gptrack,gpmargin,kernels,choosesamples,activelearning

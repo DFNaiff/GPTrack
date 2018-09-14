@@ -279,6 +279,8 @@ def _make_weight(mi,mj,covi,covj,li,lj,Mij):
 
 def _get_prior_means(phisamples,positives):
     phigrid = list(np.array(phisamples).transpose())
+    print(phigrid)
+    print(positives)
     assert len(positives) == len(phigrid)
     prior_means = np.zeros(len(phigrid))
     for i,phisample in enumerate(phigrid):
