@@ -3,6 +3,7 @@
 # TODO : Implement d2f for all kernels
 # TODO : Implement dfdx for all kernels
 import numpy as np
+import torch
 
 from . import utils
 
