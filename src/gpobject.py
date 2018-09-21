@@ -133,39 +133,35 @@ class GPObject(object):
                 GPObject with new parameters. If rethyper also hyperparameters
         """
         #REMOVE THIS : JUST FOR DEBUGGING
-        import GPy
-        def gpy_log_likelihood(xdata,ydata,h2,l,sigma2):
-            xdata = xdata.reshape(-1,1)
-            ydata = ydata.reshape(-1,1)
-            kern = GPy.kern.RBF(input_dim=1,lengthscale=l.item(),variance=h2.item())
-            model = GPy.models.GPRegression(xdata,ydata,kern,noise_var=sigma2.item())
-            return model.log_likelihood()
         #TODO : Check
         def _negative_log_likelihood(hparams,positives):
+            hparams_feed = [None]*len(hparams)
             for i,_ in enumerate(hparams):
                 if positives[i]:
-                    hparams[i] = hparams[i]**2
-            gpnew = GPObject(self.kernel,self.noisekernel,hparams,
+                    hparams_feed[i] = hparams[i]**2
+                else:
+                    hparams_feed[i] = hparams[i].clone()
+            gpnew = GPObject(self.kernel,self.noisekernel,hparams_feed,
                              (self.xdata,self.ydata))
-            print(gpnew.loglikelihood.item())
-            print(gpy_log_likelihood(self.xdata,self.ydata,
-                                     hparams[0],hparams[1],hparams[2]))
-            print(hparams)
-            print('---')
+            print(-gpnew.loglikelihood.item())
+#            print(-gpy_log_likelihood(self.xdata,self.ydata,
+#                                     hparams[0],hparams[1],hparams[2]))
+            print([p.item() for p in hparams_feed])
+#            print('---')
             return -gpnew.loglikelihood
         
         if adjustable == True:
             adjustable = True*len(positives)
         #Adjust hparams so we can differentiate
         hparams_new = []
-        for i,param in enumerate(self.phi):
+        for i,hparam in enumerate(self.phi):
             #TODO : Put adjustable here
-            hparam = param.clone()
+            hparam_new = hparam.clone()
             if positives[i]: #TODO : Check
-                hparam = torch.sqrt(hparam)
-            hparam.requires_grad_()
-            hparams_new.append(hparam)
-        #Optimizer
+                hparam_new = torch.sqrt(hparam).clone()
+            hparam_new.requires_grad_()
+            hparams_new.append(hparam_new)
+        #Optmizer
         optimizer = torch.optim.LBFGS(hparams_new,max_iter=100)
         optimizer.zero_grad()
         def closure():
@@ -178,7 +174,7 @@ class GPObject(object):
         for i,_ in enumerate(hparams_new):
             hparams_new[i].requires_grad = False
             if positives[i]:
-                hparams_new[i] = hparams_new[i]**2
+                hparams_new[i] = hparams_new[i]**2        
         gpnew = GPObject(self.kernel,self.noisekernel,hparams_new,
                          (self.xdata,self.ydata))
         return gpnew
