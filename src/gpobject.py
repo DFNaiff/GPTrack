@@ -4,34 +4,40 @@ import functools
 
 import numpy as np
 import scipy.optimize as spopt
+import torch
 
 from . import utils
 from . import utilsla
+from . import utilstorch
 
+
+#TODO : Find a way to everything be a tensor. For now 
+#       strange numpy/tensor mix (mainly because of the kernel matrix)
 
 class GPObject(object):
     def __init__(self,kernel,noise_kernel,phi,data = None):
         self._initialize_kernels(kernel,noise_kernel,phi)
-        if data != None:
-            self.change_data(data)
-        else:
-            self._initialize_empty()
+        self.change_data(data)
     
-    def predict(self,x):
+    def predict(self,x,getvar = True):
         """
             Calculate mean(x),var(x)
         """
         # TODO : add efficient update of r
-        kx = utils.relation_array(self.cov,x,self.xdata)
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        s = utilsla.invumatmul(self.U,kx,trans='T')
-        mean = self.m + np.dot(r,s)
-        var = self.cov(x,x) - np.dot(s,s)
-        return mean,var
+        x_t = torch.tensor(x).float()
+        kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
+        s = torch.trtrs(kx,self.U,transpose=True)[0]
+        mean = torch.matmul(s.transpose(1,0),self.z)
+        if not getvar:
+            return mean
+        else:
+            var = self.kernel.f(x_t,x_t) - torch.matmul(s.transpose(1,0),s)
+            return mean,var
     
     def predict_batch(self,xs):
+        raise NotImplementedError
         Kx = utils.binary_function_matrix_2(self.cov,xs,self.xdata)
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
+        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
         S = utilsla.invumatmul(self.U,Kx.transpose(),trans='T')
         mean = self.m + np.dot(S.transpose(),r)
         Kxx = utils.binary_function_matrix(self.cov,xs)
@@ -43,31 +49,35 @@ class GPObject(object):
             Changes the data of the GP, replacing it with new_data
         """
         # TODO : assertions
-        x,z = data
-        self.xdata = copy.copy(x)
-        self.zdata = np.array(z)
-        self.numdata = len(x)
-        self.K = utils.binary_function_matrix(self.cov,self.xdata)
+        x,y = data
+        self.xdata = x.copy()
+        self.ydata = y.copy()
+        self.numdata = x.shape[0]
+        self.dimdata = x.shape[1]
+        self.K = utilstorch.binary_function_matrix(self.kernel.f,
+                                                   self.xdata)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
-            I = np.diag([self.noisecov(xx,xx) for xx in self.xdata])
+            I = torch.diag(self.noisekernel.fdiag(self.xdata).flatten())
             self.K = self.K + I
         else:
             raise NotImplementedError
-        self.U = utilsla.spla.cholesky(self.K,lower=False)
+        self.U = torch.potrf(self.K)
         self._update_likelihood()
         self.is_empty = False
         
     def downdate(self,i=0):
+        raise NotImplementedError
         # TODO : do not simply downdate likelihood
         self.K = utilsla.contract(self.K,i)
         self.U = utilsla.contract_cholesky(self.U,i)
         self.xdata = self.xdata[:i] + self.xdata[i+1:]
         # TODO : surely there's a function for dropping
-        self.zdata = np.concatenate([self.zdata[:i],
-                                     self.zdata[i+1:]])
+        self.ydata = np.concatenate([self.ydata[:i],
+                                     self.ydata[i+1:]])
         self._update_likelihood()
     
     def downdate_batch(self,drop_inds,is_sorted = True):
+        raise NotImplementedError
         # TODO : not clear whether there is a simple and more efficient way
         #        to downdate. But think of one
         # Assumes drop_inds to be sorted
@@ -77,17 +87,16 @@ class GPObject(object):
             self.downdate(ind)
             
     def update(self,new_data):
+        raise NotImplementedError
         """
             Updates data, covariance matrix and it's cholesky factor, 
             and likelihood
         """
         x_t,z_t = new_data
-        if self.is_empty: # Adding first data
-            self._add_first_data(x_t,z_t)
-        else: # Updating the data
-            self._add_new_data(x_t,z_t)  
+        self._add_new_data(x_t,z_t)  
     
     def update_batch(self,new_data_batch):
+        raise NotImplementedError
         """
             x_t = [x_t1,x_t2,...,x_tn] list of inputs
             z_t = [x_t1,x_t2,...,x_tn] list of outputs
@@ -110,110 +119,71 @@ class GPObject(object):
             self.K = utilsla.expand_symmetric_with_matrix(self.K,V,C) #K
             self.U = utilsla.expand_cholesky_with_matrix(self.U,V,C) #cholesky factor
             self.xdata += x_t
-            self.zdata = np.hstack([self.zdata,np.array(z_t)])
+            self.ydata = np.hstack([self.ydata,np.array(z_t)])
             self._update_likelihood()
     
-    def optimize(self,adjustables,positives,trans = None,
-                      verbose=0,rethypers = False,
-                      tol=1e-4,method = "L-BFGS-B"):
+    def optimize(self,positives,adjustable=True):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
             input:
-                adjustables : [bool] list of parameters to change
                 positives : [bool] list of positive parameters
-                trans : list of transformation to 
-                        be applied on ith parameters on optimization. 
-                        options: None,"log","sqrt"
-                        default: [None]
-                rethypers: whether to return hyperparameters
-                tol : solver tolerance.
-                method : "L-BFGS-B","TNC" or "SLSQP"
+                adjustables : [bool] list of parameters to change
             returns:
                 GPObject with new parameters. If rethyper also hyperparameters
         """
-        #TODO : For now not adjusting mean.
-        #FIXME : This is turning quickly into spaghetti code
-        #TODO : GET choose_samples functions and use here also
-        if trans == None:
-            trans = [None]*len(positives)
-        def f_and_df(phi):
-            if verbose >= 2: print(phi)
-            # Returns both log likelihood and gradient 
-            # of the gp with adjustables parameters changed
-            phicopy = self.phi.copy()
-            phicopy[adjustables] = phi
-            for i,_ in enumerate(phicopy): #transformations
-                if trans[i] == "log":
-                    phicopy[i] = np.exp(phicopy[i])
-                if trans[i] == "sqrt":
-                    phicopy[i] = np.square(phicopy[i])
-            gpcopy = GPObject(self.kernel,self.noisekernel,
-                              phicopy,[self.xdata,self.zdata])
-            f = -gpcopy.loglikelihood
-            inds = [i for i in range(len(adjustables)) if adjustables[i]]
-            df = -gpcopy._dbatch_loglikelihood(inds)
-            for i,_ in enumerate(df): #transformations
-                if trans[i] == "log":
-                    df[i] = phicopy[i]*df[i]
-                if trans[i] == "sqrt":
-                    df[i] = 2*phicopy[i]*df[i] #TODO : Is this the correct way?
-            return f,df
-        newphiontrans = self.phi.copy()
-        for i,_ in enumerate(newphiontrans): #transformations
-            if trans[i] == "log":
-                newphiontrans[i] = np.log(newphiontrans[i])
-            if trans[i] == "sqrt":
-                newphiontrans[i] = np.sqrt(newphiontrans[i])
-        phiinit = newphiontrans[adjustables]
-        #Setting bounds
-        lb = []
-        ub = []
-        for i,adjustable in enumerate(adjustables):
-            if adjustable:
-                if trans[i] == "log":
-                    lb.append(-25);ub.append(10)
-                elif trans[i] == "sqrt":
-                    lb.append(-np.inf);ub.append(np.inf)
-                elif positives[i]:
-                    lb.append(1e-20);ub.append(np.inf)
-                else:
-                    lb.append(-np.inf);ub.append(np.inf)
-                ub.append(np.inf)
-        bounds = spopt.Bounds(lb,ub)
-        #Optimization
-        opt = spopt.minimize(f_and_df,x0 = phiinit,jac = True,bounds=bounds,
-                             tol = tol)
-        if verbose >= 1 : print(opt)
-        phiopt = opt.x
-        newphi = self.phi.copy()
-        newphi[adjustables] = phiopt
-        for i,_ in enumerate(newphi): #transformations
-            if trans[i] == "log":
-                newphi[i] = np.exp(newphi[i])
-            if trans[i] == "sqrt":
-                newphi[i] = np.square(newphi[i])
-        print(newphi)
-        newgp = GPObject(self.kernel,self.noisekernel,
-                            newphi,[self.xdata,self.zdata])
-        if not rethypers:
-            return newgp
-        else:
-            return newgp,newphi
-    
-    def _add_first_data(self,x_t,z_t):
-        self.xdata = [x_t]
-        self.zdata = np.array([z_t])
-        self.numdata = 1
-        self.K = np.array([[self.cov(x_t,x_t)]]) #K(X,X)
-        self.K = self.K + self.noise_cov(x_t,x_t) #K(X,X) + sigma^2*I
-        self.U = np.sqrt(self.K) #cholesky factor
-        self.loglikelihood = -0.5*((z_t**2)/self.K[0,0] + \
-                                   np.log(self.K[0,0]) + \
-                                   self.numdata*np.log(2*np.pi))
-        self.likelihood = np.exp(self.loglikelihood)
-        self.is_empty = False
-    
+        #REMOVE THIS : JUST FOR DEBUGGING
+        import GPy
+        def gpy_log_likelihood(xdata,ydata,h2,l,sigma2):
+            xdata = xdata.reshape(-1,1)
+            ydata = ydata.reshape(-1,1)
+            kern = GPy.kern.RBF(input_dim=1,lengthscale=l.item(),variance=h2.item())
+            model = GPy.models.GPRegression(xdata,ydata,kern,noise_var=sigma2.item())
+            return model.log_likelihood()
+        #TODO : Check
+        def _negative_log_likelihood(hparams,positives):
+            for i,_ in enumerate(hparams):
+                if positives[i]:
+                    hparams[i] = hparams[i]**2
+            gpnew = GPObject(self.kernel,self.noisekernel,hparams,
+                             (self.xdata,self.ydata))
+            print(gpnew.loglikelihood.item())
+            print(gpy_log_likelihood(self.xdata,self.ydata,
+                                     hparams[0],hparams[1],hparams[2]))
+            print(hparams)
+            print('---')
+            return -gpnew.loglikelihood
+        
+        if adjustable == True:
+            adjustable = True*len(positives)
+        #Adjust hparams so we can differentiate
+        hparams_new = []
+        for i,param in enumerate(self.phi):
+            #TODO : Put adjustable here
+            hparam = param.clone()
+            if positives[i]: #TODO : Check
+                hparam = torch.sqrt(hparam)
+            hparam.requires_grad_()
+            hparams_new.append(hparam)
+        #Optimizer
+        optimizer = torch.optim.LBFGS(hparams_new,max_iter=100)
+        optimizer.zero_grad()
+        def closure():
+            optimizer.zero_grad()
+            nll = _negative_log_likelihood(hparams_new,positives)
+            nll.backward(retain_graph=True)
+            return nll
+        optimizer.step(closure)
+        #Create new gp
+        for i,_ in enumerate(hparams_new):
+            hparams_new[i].requires_grad = False
+            if positives[i]:
+                hparams_new[i] = hparams_new[i]**2
+        gpnew = GPObject(self.kernel,self.noisekernel,hparams_new,
+                         (self.xdata,self.ydata))
+        return gpnew
+
+
     def _add_new_data(self,x_t,z_t):
         self.numdata = self.numdata + 1
         v = utils.relation_array(self.cov,x_t,self.xdata) #k(xnew,Xold)
@@ -222,7 +192,7 @@ class GPObject(object):
         self.K = utilsla.expand_symmetric(self.K,v,c) #K
         self.U = utilsla.expand_cholesky(self.U,v,c) #cholesky factor
         self.xdata.append(x_t)
-        self.zdata = np.append(self.zdata,z_t)
+        self.ydata = np.append(self.ydata,z_t)
         self._update_likelihood()
         
     def _initialize_kernels(self,kernel,noisekernel,phi):
@@ -239,33 +209,20 @@ class GPObject(object):
             self.noisekernel.reset()
         self.kernel.initialize(kernelphi)
         self.noisekernel.initialize(noisephi)
-        self.cov = self.kernel.f
-        self.noisecov = self.noisekernel.f
-        self.m = 0
-    
-    def _initialize_empty(self):
-        self.xdata = None
-        self.zdata = None
-        self.numdata = 0
-        self.K = None
-        self.U = None
-        self.likelihood = None
-        self.loglikelihood = None
-        self.is_empty = True
     
     def _update_likelihood(self):
         """
             Calculate likelihood
         """
-        # TODO : add efficient update of r
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        l1 = np.dot(r,r)
-        l2 = 2*np.sum(np.log(np.diag(self.U)))
-        l3 = self.numdata*np.log(2*np.pi)
-        self.loglikelihood = -0.5*(l1 + l2 + l3)
+        self.z = torch.trtrs(torch.tensor(self.ydata).float(),
+                             self.U,transpose=True)[0]
+        term1 = 0.5*torch.sum(self.z**2)
+        term2 = torch.sum(torch.log(torch.diag(self.U)))
+        term3 = 0.5*self.numdata*np.log(2*np.pi)
+        self.loglikelihood = -(term1 + term2 + term3)
 
     def _dbatch_loglikelihood(self,inds):
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
+        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
         alpha = utilsla.invumatmul(self.U,r,trans='N')
         M = np.outer(alpha,alpha)
         invK = utilsla.inverse_cholesky_upper(self.U)
@@ -284,7 +241,7 @@ class GPObject(object):
         # See Gaussian Process for Regression and optimization
         # TODO : Better implementation
         invK = utilsla.inverse_cholesky_upper(self.U)
-        c = np.matmul(invK,self.zdata - self.m) #invK*y
+        c = np.matmul(invK,self.ydata - self.m) #invK*y
         grads2 = []
         for i in inds:
             if i < self.nhkern: #Case kernel
@@ -308,14 +265,14 @@ class GPObject(object):
     # Legacy functions
     def _dmean_loglikelihood(self):
         raise NotImplementedError # TODO : implement
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
+        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
         alpha = utilsla.invumatmul(self.U,r,trans='N')
         g = np.sum(alpha)
         return g
     
     def _dnoisekernel_loglikelihood(self,i):
         #TODO : simplify
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
+        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
         alpha = utilsla.invumatmul(self.U,r,trans='N')
         M = np.outer(alpha,alpha)
         invK = utilsla.inverse_cholesky_upper(self.U)
@@ -326,7 +283,7 @@ class GPObject(object):
         return g
     
     def _dkernel_loglikelihood(self,i):
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
+        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
         alpha = utilsla.invumatmul(self.U,r,trans='N')
         M = np.outer(alpha,alpha)
         invK = utilsla.inverse_cholesky_upper(self.U)
