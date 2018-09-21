@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import copy
 import functools
+import time
 
 import numpy as np
 import scipy.optimize as spopt
@@ -14,24 +15,25 @@ from . import utilstorch
 #TODO : Find a way to everything be a tensor. For now 
 #       strange numpy/tensor mix (mainly because of the kernel matrix)
 
+#TODO : Operate only on tensor in GPObject. Spit numpy if needed
 class GPObject(object):
-    def __init__(self,kernel,noise_kernel,phi,data = None):
-        self._initialize_kernels(kernel,noise_kernel,phi)
+    def __init__(self,kernel,noise_kernel,hparams,data = None):
+        self._initialize_kernels(kernel,noise_kernel,hparams)
         self.change_data(data)
-    
+
     def predict(self,x,getvar = True):
         """
             Calculate mean(x),var(x)
         """
         # TODO : add efficient update of r
-        x_t = torch.tensor(x).float()
+        x = torch.tensor(x).float()
         kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
         s = torch.trtrs(kx,self.U,transpose=True)[0]
         mean = torch.matmul(s.transpose(1,0),self.z)
         if not getvar:
             return mean
         else:
-            var = self.kernel.f(x_t,x_t) - torch.matmul(s.transpose(1,0),s)
+            var = self.kernel.f(x,x) - torch.matmul(s.transpose(1,0),s)
             return mean,var
     
     def predict_batch(self,xs):
@@ -50,8 +52,8 @@ class GPObject(object):
         """
         # TODO : assertions
         x,y = data
-        self.xdata = x.copy()
-        self.ydata = y.copy()
+        self.xdata = torch.tensor(x)
+        self.ydata = torch.tensor(y)
         self.numdata = x.shape[0]
         self.dimdata = x.shape[1]
         self.K = utilstorch.binary_function_matrix(self.kernel.f,
@@ -60,7 +62,7 @@ class GPObject(object):
             I = torch.diag(self.noisekernel.fdiag(self.xdata).flatten())
             self.K = self.K + I
         else:
-            raise NotImplementedError
+            I = self.noisekernel.fdiag(self.xdata)
         self.U = torch.potrf(self.K)
         self._update_likelihood()
         self.is_empty = False
@@ -143,18 +145,13 @@ class GPObject(object):
                     hparams_feed[i] = hparams[i].clone()
             gpnew = GPObject(self.kernel,self.noisekernel,hparams_feed,
                              (self.xdata,self.ydata))
-            print(-gpnew.loglikelihood.item())
-#            print(-gpy_log_likelihood(self.xdata,self.ydata,
-#                                     hparams[0],hparams[1],hparams[2]))
-            print([p.item() for p in hparams_feed])
-#            print('---')
             return -gpnew.loglikelihood
         
         if adjustable == True:
             adjustable = True*len(positives)
         #Adjust hparams so we can differentiate
         hparams_new = []
-        for i,hparam in enumerate(self.phi):
+        for i,hparam in enumerate(self.hparams):
             #TODO : Put adjustable here
             hparam_new = hparam.clone()
             if positives[i]: #TODO : Check
@@ -179,8 +176,8 @@ class GPObject(object):
                          (self.xdata,self.ydata))
         return gpnew
 
-
     def _add_new_data(self,x_t,z_t):
+        raise NotImplementedError
         self.numdata = self.numdata + 1
         v = utils.relation_array(self.cov,x_t,self.xdata) #k(xnew,Xold)
         c = self.cov(x_t,x_t) #k(xnew,xnew)
@@ -191,20 +188,23 @@ class GPObject(object):
         self.ydata = np.append(self.ydata,z_t)
         self._update_likelihood()
         
-    def _initialize_kernels(self,kernel,noisekernel,phi):
+    def _initialize_kernels(self,kernel,noisekernel,hparams):
+        for i,_ in enumerate(hparams): #Convert to tensor
+            hparams[i] = torch.tensor(hparams[i])
         self.nhkern = kernel.nhyper #Number of kernel hyperparams
         self.nhnoise = noisekernel.nhyper #Number of noise kernel hyperparams
-        assert len(phi) == self.nhkern + self.nhnoise #Check correct nhyper
-        self.phi = phi #Hyperparams
-        kernelphi,noisephi = phi[:self.nhkern],phi[self.nhkern:]
+        assert len(hparams) == self.nhkern + self.nhnoise #Check correct nhyper
+        self.hparams = hparams #Hyperparams
+        kernelparams,noiseparams = hparams[:self.nhkern],hparams[self.nhkern:]
+        #Set kernels
         self.kernel = copy.deepcopy(kernel)
         self.noisekernel = copy.deepcopy(noisekernel)
         if hasattr(kernel,'initialized') and kernel.initialized:
             self.kernel.reset()
         if hasattr(noisekernel,'initialized') and noisekernel.initialized:
             self.noisekernel.reset()
-        self.kernel.initialize(kernelphi)
-        self.noisekernel.initialize(noisephi)
+        self.kernel.initialize(kernelparams)
+        self.noisekernel.initialize(noiseparams)
     
     def _update_likelihood(self):
         """
@@ -216,80 +216,3 @@ class GPObject(object):
         term2 = torch.sum(torch.log(torch.diag(self.U)))
         term3 = 0.5*self.numdata*np.log(2*np.pi)
         self.loglikelihood = -(term1 + term2 + term3)
-
-    def _dbatch_loglikelihood(self,inds):
-        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        M = np.outer(alpha,alpha)
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        grads = []
-        for i in inds:
-            if i < self.nhkern: #Case kernel
-                df = functools.partial(self.kernel.df,i=i)
-            elif i >= self.nhkern: #Case noise kernel
-                df = functools.partial(self.noisekernel.df,i=i - self.nhkern)
-            dK = utils.binary_function_matrix(df,self.xdata)
-            g = 0.5*((M-invK)*(dK.transpose())).sum()
-            grads.append(g)
-        return np.array(grads)
-    
-    def _d2batch_loglikelihood(self,inds):
-        # See Gaussian Process for Regression and optimization
-        # TODO : Better implementation
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        c = np.matmul(invK,self.ydata - self.m) #invK*y
-        grads2 = []
-        for i in inds:
-            if i < self.nhkern: #Case kernel
-                df = functools.partial(self.kernel.df,i=i)
-                d2f = functools.partial(self.kernel.d2f,i=i)
-            elif i >= self.nhkern: #Case noise kernel
-                df = functools.partial(self.noisekernel.df,i=i - self.nhkern)
-                d2f = functools.partial(self.noisekernel.d2f,
-                                       i=i - self.nhkern)
-            dK = utils.binary_function_matrix(df,self.xdata)
-            d2K = utils.binary_function_matrix(d2f,self.xdata)
-            M = np.matmul(np.matmul(dK,invK),dK) #dK*invK*dK
-            #First term. 1/2*tr(invK*(dK*invK*dK - d2K))
-            term1 = 0.5*((M - d2K)*(invK.transpose())).sum()
-            #Second term. 1/2*(c)'*(d2K - 2*dK*invK*dK)*c
-            term2 = 0.5*utilsla.bilinear_form(c,d2K - 2*M,c)
-            g2 = term1 + term2
-            grads2.append(g2)
-        return np.array(grads2)
-            
-    # Legacy functions
-    def _dmean_loglikelihood(self):
-        raise NotImplementedError # TODO : implement
-        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        g = np.sum(alpha)
-        return g
-    
-    def _dnoisekernel_loglikelihood(self,i):
-        #TODO : simplify
-        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        M = np.outer(alpha,alpha)
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        df = functools.partial(self.noisekernel.df,i=i)
-        dK = utils.binary_function_matrix(df,self.xdata)
-        #1/2*tr((alpha*alpha^T - K^(-1))*dK)
-        g = 0.5*((M-invK)*(dK.transpose())).sum()
-        return g
-    
-    def _dkernel_loglikelihood(self,i):
-        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        M = np.outer(alpha,alpha)
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        df = functools.partial(self.kernel.df,i=i)
-        dK = utils.binary_function_matrix(df,self.xdata)
-        #1/2*tr((alpha*alpha^T - K^(-1))*dK)
-        g = 0.5*((M-invK)*(dK.transpose())).sum()
-        return g
-    
-    def _d2kernel_loglikelihood(self,i):
-        raise NotImplementedError
-
-        
