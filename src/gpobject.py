@@ -26,7 +26,7 @@ class GPObject(object):
             Calculate mean(x),var(x)
         """
         # TODO : add efficient update of r
-        x = torch.tensor(x).float()
+        x = self._convert_input_single(x)
         kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
         s = torch.trtrs(kx,self.U,transpose=True)[0]
         mean = torch.matmul(s.transpose(1,0),self.z)
@@ -216,3 +216,7 @@ class GPObject(object):
         term2 = torch.sum(torch.log(torch.diag(self.U)))
         term3 = 0.5*self.numdata*np.log(2*np.pi)
         self.loglikelihood = -(term1 + term2 + term3)
+    
+    #Input conversion
+    def _convert_input_single(self,x):
+        return torch.tensor(x).float()

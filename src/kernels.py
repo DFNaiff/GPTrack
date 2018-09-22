@@ -46,6 +46,7 @@ class Constant(Kernel):
             {0:'h2'}
         """
         self.nhyper = 1
+        self.dim = 0
         self.hyperparams = None
         self.initialized = False
     
@@ -111,6 +112,7 @@ class SphericalCorr(Kernel):
         correlation angles
     """
     def __init__(self,nout):
+        self.dim = 1
         self.nout = nout
         self.nhyper = nout + nout*(nout-1)//2
         self.hyperparams = None
@@ -179,6 +181,43 @@ class IIDNoiseKernel(Kernel):
                                 torch.ones(x.shape[0]))
         else:
             return self.hyperparams[0]*torch.ones(x.size()[0])
+
+class MONoiseKernel(Kernel):
+    """
+        Noise kernel for multiple outputs.
+        
+    """
+    #TODO : Change
+    def __init__(self,nout):
+        self.nout = nout
+        self.is_diagonal = True
+        self.nhyper = nout
+        self.hyperparams = None
+        self.initialized = False
+        
+    def initialize(self,hyperparams):
+        assert len(hyperparams) == self.nhyper
+        self.hyperparams = hyperparams
+        self.noise_vars = hyperparams
+        self.initialized = True
+    
+    def reset(self):
+        self.hyperparams = None
+        self.initialized = False
+    
+    def f(self,x,y):
+        raise NotImplementedError
+        return self.hyperparams[0]*\
+               torch.prod(x == y,1,keepdim=True).float()
+    
+    def fdiag(self,x):
+        #TODO : Strange mixed numpy/torch thing
+        if type(x) == np.ndarray:
+            return torch.tensor(self.hyperparams[x[:,0].astype(int)]*\
+                                torch.ones(x.shape[0]))
+        else:
+            return self.hyperparams[x[:,0].long()]*torch.ones(x.size()[0])
+
 #==============================================================================
 # Compound kernels
 #==============================================================================
@@ -190,6 +229,7 @@ class CompoundKernel(Kernel):
         self.k1 = k1
         self.k2 = k2
         self.nhyper = k1.nhyper + k2.nhyper
+        self.dim = k1.dim + k2.dim
         self.hyperparams = None
         self.initialized = False
         
@@ -245,7 +285,7 @@ class DirectSum(CompoundKernel):
         
     def f(self,x,y):
         return self.k1.f(x[:,:self.nm],y[:,:self.nm]) + \
-               self.k2.f(x[:,:self.nm],y[:,:self.nm])
+               self.k2.f(x[:,self.nm:],y[:,self.nm:])
 
 
 class TensorProd(CompoundKernel):
@@ -254,8 +294,8 @@ class TensorProd(CompoundKernel):
     """
     def __init__(self,k1,k2):
         super(TensorProd,self).__init__(k1,k2)
-        self.nm = k1.nhyper
+        self.nm = k1.dim
         
     def f(self,x,y):
         return self.k1.f(x[:,:self.nm],y[:,:self.nm]) * \
-               self.k2.f(x[:,:self.nm],y[:,:self.nm])
+               self.k2.f(x[:,self.nm:],y[:,self.nm:])
