@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from . import utils
-
+from . import utilstorch
 
 SQRT3 = np.sqrt(3)
 SQRT5 = np.sqrt(5)
@@ -98,8 +98,56 @@ class IsoRBF(IsoRadKernel):
         r2 = torch.tensor(torch.sum((x - y)**2,1,keepdim=True) / \
                 (self.hyperparams[0]**2))
         return torch.exp(-0.5*r2)
+#==============================================================================
+# Multiple output kernels
+#==============================================================================
+class SphericalCorr(Kernel):
+    """
+        Spherical correlation kernel, with nout outputs. See 
+        "Gaussian Process for Prediction" technical report, 
+        by Michael Osborne. In initialization, 
+        first nout parameters are the length scales, 
+        where the others nout*(nout-1)/2 are the 
+        correlation angles
+    """
+    def __init__(self,nout):
+        self.nout = nout
+        self.nhyper = nout + nout*(nout-1)//2
+        self.hyperparams = None
+        self.W = None
+        self.initialized = False
+
+    def initialize(self,hyperparams):
+        assert len(hyperparams) == self.nhyper
+        self.hyperparams = hyperparams
+        ls = hyperparams[:self.nout]
+        ls = torch.cat([torch.unsqueeze(l,0) for l in ls])
+        thetas = hyperparams[self.nout:]
+        #Set correlation matrix
+        S = torch.zeros((self.nout,self.nout))
+        S[0,0] = 1.0
+        th_temp = thetas.copy()
+        for i in range(1,self.nout):
+            th_now,th_temp = th_temp[:i],th_temp[i:]
+            s = utilstorch.hypersphere_param(i+1,th_now)
+            S[:i+1,i] = s
+        W = torch.matmul(S.transpose(1,0),S) # S.T*S
+        W = W*torch.ger(ls,ls) # diag(l)*S.T*S*diag(l)
+        self.W = W
+        self.initialized = True
+    
+    def reset(self):
+        self.hyperparams = None
+        self.W = None
+        self.initialized = False
+
+    def f(self,x,y):
+        return self.W[x.long(),y.long()] 
 
 
+#==============================================================================
+# Noise kernels
+#==============================================================================
 class IIDNoiseKernel(Kernel):
     """
         Regular noise kernel. Number of hyperparams : 1
