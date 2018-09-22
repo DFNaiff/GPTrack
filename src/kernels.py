@@ -235,3 +235,27 @@ class Prod(CompoundKernel):
         return self.k1.f(x,y)*self.k2.f(x,y)
 
 
+class DirectSum(CompoundKernel):
+    """
+        Direct sum kernel. k([x1,y1],[x2,y2]) = k1(x1,y1) + k2(x2,y2)
+    """
+    def __init__(self,k1,k2):
+        super(DirectSum,self).__init__(k1,k2)
+        self.nm = k1.nhyper
+        
+    def f(self,x,y):
+        return self.k1.f(x[:,:self.nm],y[:,:self.nm]) + \
+               self.k2.f(x[:,:self.nm],y[:,:self.nm])
+
+
+class TensorProd(CompoundKernel):
+    """
+        Direct product kernel. k([x1,y1],[x2,y2]) = k1(x1,y1)*k2(x2,y2)
+    """
+    def __init__(self,k1,k2):
+        super(TensorProd,self).__init__(k1,k2)
+        self.nm = k1.nhyper
+        
+    def f(self,x,y):
+        return self.k1.f(x[:,:self.nm],y[:,:self.nm]) * \
+               self.k2.f(x[:,:self.nm],y[:,:self.nm])
