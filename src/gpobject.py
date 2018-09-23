@@ -124,13 +124,15 @@ class GPObject(object):
             self.ydata = np.hstack([self.ydata,np.array(z_t)])
             self._update_likelihood()
     
-    def optimize(self,positives,adjustable=True):
+    def optimize(self,positives,adjustable=True,
+                      num_starts = 1):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
             input:
                 positives : [bool] list of positive parameters
                 adjustables : [bool] list of parameters to change
+                num_starts : Number of times to run LBFG-S
             returns:
                 GPObject with new parameters. If rethyper also hyperparameters
         """
@@ -150,6 +152,7 @@ class GPObject(object):
         if adjustable == True:
             adjustable = True*len(positives)
         #Adjust hparams so we can differentiate
+            
         hparams_new = []
         for i,hparam in enumerate(self.hparams):
             #TODO : Put adjustable here

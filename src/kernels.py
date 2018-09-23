@@ -8,8 +8,8 @@ import torch
 from . import utils
 from . import utilstorch
 
-SQRT3 = np.sqrt(3)
-SQRT5 = np.sqrt(5)
+SQRT3 = float(np.sqrt(3))
+SQRT5 = float(np.sqrt(5))
 
 
 class Kernel(object):
@@ -85,7 +85,7 @@ class IsoRadKernel(Kernel):
     def reset(self):
         self.hyperparams = None
         self.initialized = False
-
+    
 
 class IsoRBF(IsoRadKernel):
     """
@@ -99,6 +99,50 @@ class IsoRBF(IsoRadKernel):
         r2 = torch.tensor(torch.sum((x - y)**2,1,keepdim=True) / \
                 (self.hyperparams[0]**2))
         return torch.exp(-0.5*r2)
+
+
+class IsoMatern12(IsoRadKernel):
+    """
+        Isotropic Matern12 kernel. Number of hyperparams : 1
+        {0:'l'}
+    """
+    def __init__(self,dim):
+        super(IsoMatern12,self).__init__(dim)
+        
+    def f(self,x,y):
+        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
+                self.hyperparams[0])
+        return torch.exp(-r)
+
+
+class IsoMatern32(IsoRadKernel):
+    """
+        Isotropic Matern52 kernel. Number of hyperparams : 1
+        {0:'l'}
+    """
+    def __init__(self,dim):
+        super(IsoMatern32,self).__init__(dim)
+        
+    def f(self,x,y):
+        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
+                self.hyperparams[0])
+        return (1 + SQRT3*r)*torch.exp(-SQRT3*r)
+        
+
+class IsoMatern52(IsoRadKernel):
+    """
+        Isotropic Matern52 kernel. Number of hyperparams : 1
+        {0:'l'}
+    """
+    def __init__(self,dim):
+        super(IsoMatern52,self).__init__(dim)
+        
+    def f(self,x,y):
+        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
+                self.hyperparams[0])
+        return (1 + SQRT5*r + 5.0/3*r**2)*torch.exp(-SQRT5*r)
+
+
 #==============================================================================
 # Multiple output kernels
 #==============================================================================
