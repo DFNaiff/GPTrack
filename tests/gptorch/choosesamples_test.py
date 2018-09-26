@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from src import kernels,utilstorch,gpobject
+from src import kernels,utilstorch,gpobject,choosesamples
 
 
 data = np.load("../datasets/process1a.npz")
@@ -37,32 +37,33 @@ kernel = kernels.TensorProd(kernels.SphericalCorr(2),
                             kernels.IsoMatern32(dim=1))
 noisekernel = kernels.MONoiseKernel(nout=2)
 hparams = [6.0,20.0,1.57,20.0,0.25,1.0]
-#noisekernel = kernels.IIDNoiseKernel()
-#hparams = [1.0,1.0,np.pi/3,1.0,1e-2]
-
 positives = [True,True,False,True,True,True]
-#Kernel testing
+#Choose samples testing
+samples = choosesamples.choose_samples_grid((xtrain,ytrain),kernel,
+                                            noisekernel,positives,
+                                            hparams,verbose=True)
+print(samples)
 #xkern,ykern = torch.tensor(xtrain)
-gp = gpobject.GPObject(kernel,noisekernel,hparams,(xtrain,ytrain))
-gp = gp.optimize(positives)
-
-#Prediction
-#Ypred = []
-#Zpred = []
-#for t in T:
-#    ypred = gp.predict([[0.0,np.float(t)]])[0][0,0]
-#    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
-#    Ypred.append(ypred)
-#    Zpred.append(zpred)
-T0 = np.hstack([0.0*np.ones((100,1)),T.reshape(-1,1).astype(float)])
-T1 = np.hstack([1.0*np.ones((100,1)),T.reshape(-1,1).astype(float)])
-Ypred = gp.predict_batch(T0,getvar = False).flatten()
-Zpred = gp.predict_batch(T1,getvar = False).flatten()
-plt.figure()
-plt.plot(T,Y,'b')
-#plt.plot(T,xtrain[:ntraining,1],'go')
-plt.plot(T,Ypred,'r')
-plt.figure()
-plt.plot(T,Z,'b')
-#plt.plot(T,xtrain[ntraining:,1],'go')
-plt.plot(T,Zpred,'r')
+#gp = gpobject.GPObject(kernel,noisekernel,hparams,(xtrain,ytrain))
+#gp = gp.optimize(positives)
+#
+##Prediction
+##Ypred = []
+##Zpred = []
+##for t in T:
+##    ypred = gp.predict([[0.0,np.float(t)]])[0][0,0]
+##    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
+##    Ypred.append(ypred)
+##    Zpred.append(zpred)
+#T0 = np.hstack([0.0*np.ones((100,1)),T.reshape(-1,1).astype(float)])
+#T1 = np.hstack([1.0*np.ones((100,1)),T.reshape(-1,1).astype(float)])
+#Ypred = gp.predict_batch(T0,getvar = False).flatten()
+#Zpred = gp.predict_batch(T1,getvar = False).flatten()
+#plt.figure()
+#plt.plot(T,Y,'b')
+##plt.plot(T,xtrain[:ntraining,1],'go')
+#plt.plot(T,Ypred,'r')
+#plt.figure()
+#plt.plot(T,Z,'b')
+##plt.plot(T,xtrain[ntraining:,1],'go')
+#plt.plot(T,Zpred,'r')

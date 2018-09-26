@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 import copy
-import functools
-import time
 
 import numpy as np
-import scipy.optimize as spopt
 import torch
 
 from . import utils
@@ -140,14 +137,14 @@ class GPObject(object):
             self._update_likelihood()
     
     def optimize(self,positives,adjustable=True,
-                      num_starts = 1):
+                      num_starts = 1,verbose=False):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
             input:
                 positives : [bool] list of positive parameters
                 adjustables : [bool] list of parameters to change
-                num_starts : Number of times to run LBFG-S
+                num_starts : Number of times to run L-BFGS
             returns:
                 GPObject with new parameters. If rethyper also hyperparameters
         """
@@ -160,14 +157,18 @@ class GPObject(object):
                     hparams_feed[i] = hparams[i]**2
                 else:
                     hparams_feed[i] = hparams[i].clone()
+            if verbose:
+                print([h.item() for h in hparams_feed])
             gpnew = GPObject(self.kernel,self.noisekernel,hparams_feed,
                              (self.xdata,self.ydata))
+            if verbose:
+                print(gpnew.loglikelihood.item())
+                print("-"*10)
             return -gpnew.loglikelihood
         
         if adjustable == True:
             adjustable = True*len(positives)
         #Adjust hparams so we can differentiate
-            
         hparams_new = []
         for i,hparam in enumerate(self.hparams):
             #TODO : Put adjustable here
@@ -241,6 +242,7 @@ class GPObject(object):
 
     def _convert_input_batch(self,x):
         return torch.tensor(x).float()
+    
     #Print functions
     def showhparams(self):
         print([hp.item() for hp in self.hparams])
