@@ -242,6 +242,8 @@ class MONoiseKernel(Kernel):
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
         self.hyperparams = hyperparams
+        self._htensor = torch.cat([torch.unsqueeze(hp,0) 
+                                   for hp in self.hyperparams])
         self.noise_vars = hyperparams
         self.initialized = True
     
@@ -260,7 +262,7 @@ class MONoiseKernel(Kernel):
             return torch.tensor(self.hyperparams[x[:,0].astype(int)]*\
                                 torch.ones(x.shape[0]))
         else:
-            return self.hyperparams[x[:,0].long()]*torch.ones(x.size()[0])
+            return self._htensor[x[:,0].long()]*torch.ones(x.size()[0])
 
 #==============================================================================
 # Compound kernels

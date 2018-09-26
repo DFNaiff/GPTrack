@@ -10,14 +10,15 @@ from src import kernels,utilstorch,gpobject
 
 data = np.load("../datasets/process1a.npz")
 
-T = data['T']
-Y = data['Y']
-Z = data['Z']
+ndata = 100
+T = data['T'][:ndata]
+Y = data['Y'][:ndata]
+Z = data['Z'][:ndata]
 
 
-def set_data(T,Y,Z,p=0.5):
-    ind_list = np.arange(100,dtype=int)
-    inds_training = np.random.choice(ind_list,size=int(100*(1-p)),
+def set_data(T,Y,Z,p=0.8):
+    ind_list = np.arange(ndata,dtype=int)
+    inds_training = np.random.choice(ind_list,size=int(ndata*(1-p)),
                                      replace=False)
     ntraining = len(inds_training)
 #    inds_test = [i for i in ind_list if i not in inds_training]
@@ -33,23 +34,30 @@ def set_data(T,Y,Z,p=0.5):
     
 xtrain,ytrain,ntraining = set_data(T,Y,Z)
 kernel = kernels.TensorProd(kernels.SphericalCorr(2),
-                            kernels.IsoRBF(dim=1))
-noisekernel = kernels.IIDNoiseKernel()
-hparams = [1.0,1.0,np.pi/3,1.0,1e-2]
-positives = [True,True,False,True,True]
+                            kernels.IsoMatern32(dim=1))
+noisekernel = kernels.MONoiseKernel(nout=2)
+hparams = [10.0,10.0,np.pi/3,10.0,1e-2,1e-2]
+#noisekernel = kernels.IIDNoiseKernel()
+#hparams = [1.0,1.0,np.pi/3,1.0,1e-2]
+
+positives = [True,True,False,True,True,True]
 #Kernel testing
 #xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(xtrain,ytrain))
 gp = gp.optimize(positives)
 
 #Prediction
-Ypred = []
-Zpred = []
-for t in T:
-    ypred = gp.predict([[0.0,np.float(t)]])[0].numpy()[0,0]
-    zpred = gp.predict([[1.0,np.float(t)]])[0].numpy()[0,0]
-    Ypred.append(ypred)
-    Zpred.append(zpred)
+#Ypred = []
+#Zpred = []
+#for t in T:
+#    ypred = gp.predict([[0.0,np.float(t)]])[0][0,0]
+#    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
+#    Ypred.append(ypred)
+#    Zpred.append(zpred)
+T0 = np.hstack([0.0*np.ones((100,1)),T.reshape(-1,1).astype(float)])
+T1 = np.hstack([1.0*np.ones((100,1)),T.reshape(-1,1).astype(float)])
+Ypred = gp.predict_batch(T0,getvar = False).flatten()
+Zpred = gp.predict_batch(T1,getvar = False).flatten()
 plt.figure()
 plt.plot(T,Y,'b')
 #plt.plot(T,xtrain[:ntraining,1],'go')

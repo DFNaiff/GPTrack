@@ -21,7 +21,7 @@ class GPObject(object):
         self._initialize_kernels(kernel,noise_kernel,hparams)
         self.change_data(data)
 
-    def predict(self,x,getvar = True):
+    def predict(self,x,getvar = True,return_as_numpy = True):
         """
             Calculate mean(x),var(x)
         """
@@ -31,20 +31,34 @@ class GPObject(object):
         s = torch.trtrs(kx,self.U,transpose=True)[0]
         mean = torch.matmul(s.transpose(1,0),self.z)
         if not getvar:
-            return mean
+            if return_as_numpy: return mean.numpy()
+            else: return mean
         else:
             var = self.kernel.f(x,x) - torch.matmul(s.transpose(1,0),s)
-            return mean,var
+            if return_as_numpy: return mean.numpy(),var.numpy()
+            else: return mean,var
     
-    def predict_batch(self,xs):
-        raise NotImplementedError
-        Kx = utils.binary_function_matrix_2(self.cov,xs,self.xdata)
-        r = utilsla.invumatmul(self.U,self.ydata - self.m,trans='T')
-        S = utilsla.invumatmul(self.U,Kx.transpose(),trans='T')
-        mean = self.m + np.dot(S.transpose(),r)
-        Kxx = utils.binary_function_matrix(self.cov,xs)
-        var = Kxx - np.dot(S.transpose(),S)
-        return mean,var
+    def predict_batch(self,x,getvar = True,return_as_numpy = True,
+                       retdiag = True):
+        """
+            Calculate mean(x),var(x)
+        """
+        # TODO : add efficient update of r
+        x = self._convert_input_batch(x)
+        kx = utilstorch.binary_function_matrix_ret(self.kernel.f,
+                                                   self.xdata,x)
+        s = torch.trtrs(kx,self.U,transpose=True)[0]
+        mean = torch.matmul(s.transpose(1,0),self.z)
+        if not getvar:
+            if return_as_numpy: return mean.numpy()
+            else: return mean
+        else:
+            var = utilstorch.binary_function_matrix(self.kernel.f,x) - \
+                  torch.matmul(s.transpose(1,0),s)
+            if retdiag:
+                var = torch.diag(var)
+            if return_as_numpy: return mean.numpy(),var.numpy()
+            else: return mean,var
     
     def change_data(self,data):
         """
@@ -59,7 +73,8 @@ class GPObject(object):
         self.K = utilstorch.binary_function_matrix(self.kernel.f,
                                                    self.xdata)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
-            I = torch.diag(self.noisekernel.fdiag(self.xdata).flatten())
+            Idiag = self.noisekernel.fdiag(self.xdata)
+            I = torch.diag(Idiag)
             self.K = self.K + I
         else:
             I = self.noisekernel.fdiag(self.xdata)
@@ -223,3 +238,9 @@ class GPObject(object):
     #Input conversion
     def _convert_input_single(self,x):
         return torch.tensor(x).float()
+
+    def _convert_input_batch(self,x):
+        return torch.tensor(x).float()
+    #Print functions
+    def showhparams(self):
+        print([hp.item() for hp in self.hparams])

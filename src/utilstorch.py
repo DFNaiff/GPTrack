@@ -17,6 +17,21 @@ def binary_function_matrix(f,x):
     K = K.reshape(n,n)
     return K
 
+def binary_function_matrix_ret(f,x1,x2):
+    """
+        f : two argument kernel function
+        x1 : array
+        x2 : array
+        returns : n x n tensor M, where M[i,j] = f(l_i,l_j)
+    """
+    n = x1.shape[0]
+    m = x2.shape[0]
+    X1 = torch.tensor(np.repeat(x1.numpy(),m,axis=0)).float()
+    X2 = torch.tensor(np.tile(x2.numpy(),[n,1])).float()
+    K = f(X1,X2)
+    K = K.reshape(n,m)
+    return K
+    
 def hypersphere_param(n,thetas):
     #Here, n is the dimension of the underlying space (for instance, 
     #n = 2 is the parametrisation of the circle)

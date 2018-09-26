@@ -16,7 +16,7 @@ var = 0.1
 period = 0.1
 amplitude = 0.1
 noise = 0.1
-T = np.arange(201)
+T = np.arange(1001)
 x0 = 0.0
 y0 = 0.0
 z0 = 0.0
@@ -39,4 +39,4 @@ plt.figure()
 plt.plot(T,Y,'g')
 plt.plot(T,Z,'r')
 
-np.savez("process2b.npz",T=T,X=X,Y=Y,Z=Z)
+np.savez("process2c.npz",T=T,X=X,Y=Y,Z=Z)
