@@ -172,10 +172,12 @@ class SphericalCorr(Kernel):
         #Set correlation matrix
         S = torch.zeros((self.nout,self.nout))
         S[0,0] = 1.0
-        th_temp = thetas.copy()
         for i in range(1,self.nout):
-            th_now,th_temp = th_temp[:i],th_temp[i:]
-            s = utilstorch.hypersphere_param(i+1,th_now)
+            start_ind = utils.triangular(i-1)
+            end_ind = utils.triangular(i)
+#            th_now,th_temp = th_temp[:i],th_temp[i:]
+            s = utilstorch.hypersphere_param(i+1,
+                                             thetas[start_ind:end_ind])
             S[:i+1,i] = s
         W = torch.matmul(S.transpose(1,0),S) # S.T*S
         W = W*torch.ger(ls,ls) # diag(l)*S.T*S*diag(l)

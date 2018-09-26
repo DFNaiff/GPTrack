@@ -17,6 +17,7 @@ def binary_function_matrix(f,x):
     K = K.reshape(n,n)
     return K
 
+
 def binary_function_matrix_ret(f,x1,x2):
     """
         f : two argument kernel function
@@ -31,22 +32,29 @@ def binary_function_matrix_ret(f,x1,x2):
     K = f(X1,X2)
     K = K.reshape(n,m)
     return K
-    
+
+
 def hypersphere_param(n,thetas):
     #Here, n is the dimension of the underlying space (for instance, 
     #n = 2 is the parametrisation of the circle)
     #TODO : There is a strange workaround here
-    if n == 2:
-        w0 = (torch.unsqueeze(torch.cos(thetas[0]),0),
-              torch.unsqueeze(torch.sin(thetas[0]),0))
-        w0 = torch.cat(w0)
-        return w0
-    else:
-        w0 = (torch.cos(thetas[0]).unsqueeze(0),
-              torch.sin(thetas[0])*torch.ones(n-1))
-        w0 = torch.cat(w0)
-        w0[1:] = w0[1:]*hypersphere_param(n-1,thetas[1:])
-        return w0
+    w0 = [None]*n
+    for i in range(n-1):
+        w0i = torch.cos(thetas[i])
+        for j in range(0,i):
+            w0i = w0i*torch.sin(thetas[j])
+        w0i = w0i.unsqueeze(0)
+        w0[i] = w0i
+    #Last one
+    w0i = torch.sin(thetas[0])
+    for j in range(1,n-1):
+        w0i = w0i*torch.sin(thetas[j])
+    w0i = w0i.unsqueeze(0)
+    w0[-1] = w0i
+    #Join everything
+    w0 = torch.cat(w0)
+    return w0
+
 
 def relation_array(f,x,X):
     #TODO : Find a way to not pass through numpy

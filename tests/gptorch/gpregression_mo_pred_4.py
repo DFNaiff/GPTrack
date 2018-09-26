@@ -18,7 +18,7 @@ Y = data['Y'][:ndata]
 Z = data['Z'][:ndata]
 
 
-def set_data(T,Ylist,Z,p=0.7,nprevious=10):
+def set_data(T,Ylist,Z,p=0.5,nprevious=10):
     """
         T : Time index
         Ylist : list of itens to be used for prediction
@@ -55,29 +55,33 @@ def set_data(T,Ylist,Z,p=0.7,nprevious=10):
 #    ytest = T[inds_test]
     return Xtrain,Ytrain,Xdata,Ydata
     
-Xtrain,Ytrain,Xdata,Ydata = set_data(T,[Y],Z,nprevious = nsplit)
-kernel = kernels.TensorProd(kernels.SphericalCorr(2),
+Xtrain,Ytrain,Xdata,Ydata = set_data(T,[X,Y],Z,nprevious = nsplit)
+kernel = kernels.TensorProd(kernels.SphericalCorr(3),
                             kernels.IsoMatern32(dim=1))
-noisekernel = kernels.MONoiseKernel(2)
+noisekernel = kernels.IIDNoiseKernel()
 #hparams = [1.0,1.0,np.pi/3,10.0,1e-2,1e-2]
 #positives = [True,True,False,True,True,True]
 hparams = [0.7965539693832397, 0.8695805072784424, 0.8,
            1.0,1.0,0.8400896787643433, 60.11109161376953,
-           1e-1,0.0036748519632965326, 0.0017090144101530313]
-
-positives = [True,True,True,False,True,True,True]
+           1e-1]
+hparams = [0.8772075772285461, 1.386620283126831, 0.9989368319511414, 1.1128194332122803, 1.0215511322021484, 0.831591784954071, 59.16266632080078, 0.0501825176179409]
+positives = [True,True,True,
+             False,False,False,True,
+             True]
 #Kernel testing
 ##xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Ydata))
-gp = gp.optimize(positives,verbose=True,num_starts = 1)
+#gp = gp.optimize(positives,verbose=True,num_starts = 1)
 #hparams = gp.showhparams()
 #print(hparams)
 #gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Xdata))
 
 T0 = np.hstack([0.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])
 T1 = np.hstack([1.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])
-Ypred = gp.predict_batch(T0,getvar = False).flatten()
-Zpred = gp.predict_batch(T1,getvar = False).flatten()
+T2 = np.hstack([2.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])
+Xpred = gp.predict_batch(T0,getvar = False).flatten()
+Ypred = gp.predict_batch(T1,getvar = False).flatten()
+Zpred = gp.predict_batch(T2,getvar = False).flatten()
 #Prediction
 #Ypred = []
 #Zpred = []
@@ -86,6 +90,11 @@ Zpred = gp.predict_batch(T1,getvar = False).flatten()
 #    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
 #    Ypred.append(ypred)
 #    Zpred.append(zpred)
+plt.figure()
+plt.plot(T,X,'b')
+#plt.plot(T,xtrain[:ntraining,1],'go')
+plt.plot(T,Xpred,'r')
+
 plt.figure()
 plt.plot(T,Y,'b')
 #plt.plot(T,xtrain[:ntraining,1],'go')
