@@ -16,7 +16,7 @@ Y = data['Y'][:ndata]
 Z = data['Z'][:ndata]
 
 
-def set_data(T,Y,Z,p=0.5):
+def set_data(T,Y,Z,p=0.1):
     ind_list = np.arange(ndata,dtype=int)
     inds_training = np.random.choice(ind_list,size=int(ndata*(1-p)),
                                      replace=False)
@@ -38,12 +38,13 @@ kernel = kernels.TensorProd(kernels.SphericalCorr(2),
 noisekernel = kernels.MONoiseKernel(nout=2)
 hparams = [6.0,20.0,1.57,20.0,0.25,1.0]
 #noisekernel = kernels.IIDNoiseKernel()
-#hparams = [1.0,1.0,np.pi/3,1.0,1e-2]
+#hparams = [10.0,20.0,np.pi/3,1.0,1.0]
 
 positives = [True,True,False,True,True,True]
 #Kernel testing
 #xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(xtrain,ytrain))
+
 gp = gp.optimize(positives)
 
 #Prediction

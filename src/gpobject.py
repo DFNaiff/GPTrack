@@ -4,6 +4,7 @@ import copy
 import numpy as np
 import torch
 
+from . import gpoptimizer
 from . import utils
 from . import utilsla
 from . import utilstorch
@@ -137,7 +138,8 @@ class GPObject(object):
             self._update_likelihood()
     
     def optimize(self,positives,adjustable=True,
-                      num_starts = 1,verbose=False):
+                      num_starts = 1,verbose=False,
+                      penalize_runtime_error = True):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
@@ -148,52 +150,11 @@ class GPObject(object):
             returns:
                 GPObject with new parameters. If rethyper also hyperparameters
         """
-        #REMOVE THIS : JUST FOR DEBUGGING
-        #TODO : Check
-        def _negative_log_likelihood(hparams,positives):
-            hparams_feed = [None]*len(hparams)
-            for i,_ in enumerate(hparams):
-                if positives[i]:
-                    hparams_feed[i] = hparams[i]**2
-                else:
-                    hparams_feed[i] = hparams[i].clone()
-            if verbose:
-                print([h.item() for h in hparams_feed])
-            gpnew = GPObject(self.kernel,self.noisekernel,hparams_feed,
-                             (self.xdata,self.ydata))
-            if verbose:
-                print(gpnew.loglikelihood.item())
-                print("-"*10)
-            return -gpnew.loglikelihood
-        
-        if adjustable == True:
-            adjustable = True*len(positives)
-        #Adjust hparams so we can differentiate
-        hparams_new = []
-        for i,hparam in enumerate(self.hparams):
-            #TODO : Put adjustable here
-            hparam_new = hparam.clone()
-            if positives[i]: #TODO : Check
-                hparam_new = torch.sqrt(hparam).clone()
-            hparam_new.requires_grad_()
-            hparams_new.append(hparam_new)
-        #Optmizer
-        optimizer = torch.optim.LBFGS(hparams_new,max_iter=100)
-        optimizer.zero_grad()
-        def closure():
-            optimizer.zero_grad()
-            nll = _negative_log_likelihood(hparams_new,positives)
-            nll.backward(retain_graph=True)
-            return nll
-        optimizer.step(closure)
-        #Create new gp
-        for i,_ in enumerate(hparams_new):
-            hparams_new[i].requires_grad = False
-            if positives[i]:
-                hparams_new[i] = hparams_new[i]**2        
-        gpnew = GPObject(self.kernel,self.noisekernel,hparams_new,
-                         (self.xdata,self.ydata))
-        return gpnew
+        return gpoptimizer.optimize(self.kernel,self.noisekernel,
+                                    self.hparams,(self.xdata,self.ydata),
+                                    positives,adjustable,
+                                    num_starts,verbose,
+                                    penalize_runtime_error)
 
     def _add_new_data(self,x_t,z_t):
         raise NotImplementedError
@@ -245,4 +206,4 @@ class GPObject(object):
     
     #Print functions
     def showhparams(self):
-        print([hp.item() for hp in self.hparams])
+        return [hp.item() for hp in self.hparams]

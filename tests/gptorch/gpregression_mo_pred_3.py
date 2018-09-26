@@ -10,14 +10,15 @@ from src import kernels,utilstorch,gpobject
 
 data = np.load("../datasets/process2b.npz")
 
-T = data['T'][:200]
-Y = data['Y'][:200]
-Z = data['Z'][:200]
+T = data['T'][:150]
+X = data['X'][:150]
+Y = data['Y'][:150]
+Z = data['Z'][:150]
 
 
 def set_data(T,Y,Z,p=0.7):
     ndata = len(T)
-    nprevious = 100
+    nprevious = 50
     npred = ndata - nprevious
     ind_list = np.arange(nprevious,dtype=int)
     inds_training = np.random.choice(ind_list,size=int(nprevious*(1-p)),
@@ -42,27 +43,37 @@ def set_data(T,Y,Z,p=0.7):
 xtrain,ytrain,ntraining = set_data(T,Y,Z)
 kernel = kernels.TensorProd(kernels.SphericalCorr(2),
                             kernels.IsoMatern12(dim=1))
-noisekernel = kernels.IIDNoiseKernel()
-hparams = [1.0,1.0,np.pi/3,10.0,1e-2]
-positives = [True,True,False,True,True]
+noisekernel = kernels.MONoiseKernel(2)
+hparams = [1.0,1.0,np.pi/3,10.0,1e-2,1e-2]
+positives = [True,True,False,True,True,True]
 #Kernel testing
 #xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(xtrain,ytrain))
 gp = gp.optimize(positives)
 print([p.item() for p in gp.hparams])
 #Prediction
-Ypred = []
-Zpred = []
-for t in T:
-    ypred = gp.predict([[0.0,np.float(t)]])[0][0,0]
-    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
-    Ypred.append(ypred)
-    Zpred.append(zpred)
+T0 = np.hstack([0.0*np.ones((150,1)),T.reshape(-1,1).astype(float)])
+T1 = np.hstack([1.0*np.ones((150,1)),T.reshape(-1,1).astype(float)])
+Ypred = gp.predict_batch(T0,getvar = False).flatten()
+Zpred = gp.predict_batch(T1,getvar = False).flatten()
+
+#Ypred = []
+#Zpred = []
+#for t in T:
+#    ypred = gp.predict([[0.0,np.float(t)]])[0][0,0]
+#    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
+#    Ypred.append(ypred)
+#    Zpred.append(zpred)
+#Ypred = np.array(Ypred)
+#Zpred = np.array(Zpred)
+print('ok')
 plt.figure()
-plt.plot(T,Y,'b')
+print(T.shape,Y.shape,Ypred.shape,Z.shape,Zpred.shape)
+
+plt.plot(T,Y)
 #plt.plot(T,xtrain[:ntraining,1],'go')
-plt.plot(T,Ypred,'r')
+plt.plot(T,Ypred)
 plt.figure()
-plt.plot(T,Z,'b')
+plt.plot(T,Z)
 #plt.plot(T,xtrain[ntraining:,1],'go')
-plt.plot(T,Zpred,'r')
+plt.plot(T,Zpred)

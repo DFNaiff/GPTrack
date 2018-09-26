@@ -65,7 +65,7 @@ hparams = [0.7965539693832397, 0.8695805072784424, 0.8,
            1.0,1.0,0.8400896787643433, 60.11109161376953,
            1e-1,0.0036748519632965326, 0.0017090144101530313]
 
-positives = [True,True,False,True,True,True]
+positives = [True,True,True,False,True,True,True]
 #Kernel testing
 ##xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Ydata))
