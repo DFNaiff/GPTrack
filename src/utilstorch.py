@@ -36,8 +36,7 @@ def binary_function_matrix_ret(f,x1,x2):
 
 def hypersphere_param(n,thetas):
     #Here, n is the dimension of the underlying space (for instance, 
-    #n = 2 is the parametrisation of the circle)
-    #TODO : There is a strange workaround here
+    #n = 2 is the parametrisation of the circle, 3 parametrization sphere)
     w0 = [None]*n
     for i in range(n-1):
         w0i = torch.cos(thetas[i])

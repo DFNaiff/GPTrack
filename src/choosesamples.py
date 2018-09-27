@@ -28,6 +28,8 @@ def choose_samples_grid(data,kernel,noisekernel,
         gp = gpobject.GPObject(kernel,noisekernel,hparams,data)
         gp = gp.optimize(positives,verbose=verbose)
         hparams = gp.hparams
+    else:
+        hparams = [torch.tensor(p) for p in hparams]
     #Extremely inneficient to make ANOTHER gp here
     #Adjust hparams so we can get second derivatives
     hparams_new = [None]*len(hparams)

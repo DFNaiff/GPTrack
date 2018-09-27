@@ -121,6 +121,7 @@ class GPMarginGrid(object):
             m_i,C_i = self.gplist[i].predict_batch(xs)
             m_list[i] = m_i
             C_list[i] = C_i
+        print(m_list,C_list)
         m,C = _combine_predictions_batch(self.rho_vector,m_list,C_list)
         if not retvar:
             return m,C
@@ -140,9 +141,7 @@ class GPMarginGrid(object):
             # Supply ith gaussian process with the mean function meanfunc 
             # and covariance function cov func
             self.gplist[i] = gpobject.GPObject(self.kernel,self.noisekernel,
-                                               phisample)
-            if data:
-                self.gplist[i].change_data(data)
+                                               phisample,data)
     
     def _determine_weights_vector(self):
         self.rho_vector = _determine_weights(self.weights_term,self.gplist)
@@ -232,7 +231,7 @@ def _combine_predictions_batch(rho_vector,m_list,C_list):
     
 def _determine_weights(weights_term,gplist):
     W,U = weights_term
-    loglikelihoods = np.array([gp.loglikelihood for gp in gplist])
+    loglikelihoods = np.array([gp.loglikelihood.item() for gp in gplist])
     loglikelihoods = loglikelihoods - np.max(loglikelihoods) #To avoid overflow
     likelihoods = np.exp(loglikelihoods)
     #Calculate rho

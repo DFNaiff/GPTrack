@@ -58,22 +58,23 @@ def set_data(T,Ylist,Z,p=0.5,nprevious=10):
 Xtrain,Ytrain,Xdata,Ydata = set_data(T,[X,Y],Z,nprevious = nsplit)
 kernel = kernels.TensorProd(kernels.SphericalCorr(3),
                             kernels.IsoMatern32(dim=1))
-noisekernel = kernels.IIDNoiseKernel()
+noisekernel = kernels.MONoiseKernel(3)
 #hparams = [1.0,1.0,np.pi/3,10.0,1e-2,1e-2]
-#positives = [True,True,False,True,True,True]
+positives = [True,True,False,True,True,True]
 hparams = [0.7965539693832397, 0.8695805072784424, 0.8,
            1.0,1.0,0.8400896787643433, 60.11109161376953,
-           1e-1]
-hparams = [0.8772075772285461, 1.386620283126831, 0.9989368319511414, 1.1128194332122803, 1.0215511322021484, 0.831591784954071, 59.16266632080078, 0.0501825176179409]
+           1e-1,1e-1,1e-1]
+#hparams = [0.8772075772285461, 1.386620283126831, 0.9989368319511414, 1.1128194332122803, 1.0215511322021484, 0.831591784954071, 59.16266632080078, 0.0501825176179409]
 positives = [True,True,True,
              False,False,False,True,
-             True]
+             True,True,True]
 #Kernel testing
-##xkern,ykern = torch.tensor(xtrain)
+#xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Ydata))
-#gp = gp.optimize(positives,verbose=True,num_starts = 1)
-#hparams = gp.showhparams()
-#print(hparams)
+gp = gp.optimize(positives,verbose=True,num_starts = 5,
+                 option="B")
+hparams = gp.showhparams()
+print(hparams)
 #gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Xdata))
 
 T0 = np.hstack([0.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])

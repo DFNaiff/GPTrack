@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 import copy
+import functools
 
 import numpy as np
 import torch
 
-from . import gpoptimizer
 from . import utils
 from . import utilsla
 from . import utilstorch
@@ -139,7 +139,8 @@ class GPObject(object):
     
     def optimize(self,positives,adjustable=True,
                       num_starts = 1,verbose=False,
-                      penalize_runtime_error = True):
+                      penalize_runtime_error = True,
+                      option = "A"):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
@@ -150,11 +151,12 @@ class GPObject(object):
             returns:
                 GPObject with new parameters. If rethyper also hyperparameters
         """
-        return gpoptimizer.optimize(self.kernel,self.noisekernel,
+        return _optimize(self.kernel,self.noisekernel,
                                     self.hparams,(self.xdata,self.ydata),
                                     positives,adjustable,
                                     num_starts,verbose,
-                                    penalize_runtime_error)
+                                    penalize_runtime_error,
+                                    option = option)
 
     def _add_new_data(self,x_t,z_t):
         raise NotImplementedError
@@ -169,13 +171,14 @@ class GPObject(object):
         self._update_likelihood()
         
     def _initialize_kernels(self,kernel,noisekernel,hparams):
+        self.hparams = [None]*len(hparams)
         for i,_ in enumerate(hparams): #Convert to tensor
-            hparams[i] = torch.tensor(hparams[i])
+            self.hparams[i] = torch.tensor(hparams[i])
         self.nhkern = kernel.nhyper #Number of kernel hyperparams
         self.nhnoise = noisekernel.nhyper #Number of noise kernel hyperparams
         assert len(hparams) == self.nhkern + self.nhnoise #Check correct nhyper
-        self.hparams = hparams #Hyperparams
-        kernelparams,noiseparams = hparams[:self.nhkern],hparams[self.nhkern:]
+        kernelparams = self.hparams[:self.nhkern]
+        noiseparams = self.hparams[self.nhkern:]
         #Set kernels
         self.kernel = copy.deepcopy(kernel)
         self.noisekernel = copy.deepcopy(noisekernel)
@@ -207,3 +210,168 @@ class GPObject(object):
     #Print functions
     def showhparams(self):
         return [hp.item() for hp in self.hparams]
+        
+#==============================================================================
+# Optimizer for GP
+#==============================================================================
+#TODO : Due to circular dependences, this isn't in another .py file.
+#       But there should be a workaround
+#TODO : DRY
+def _optimize(kernel,noisekernel,hparams,
+             data,positives,adjustable=True,
+             num_starts = 1,verbose=False,
+             penalize_runtime_error = True,
+             option = "A"):
+    """
+        Choose new parameters for the GP based on 
+        MLE estimation.
+        input:
+            positives : [bool] list of positive parameters
+            adjustables : [bool] list of parameters to change
+            num_starts : Number of times to run L-BFGS
+        returns:
+            GPObject with new parameters. If rethyper also hyperparameters
+    """
+    #TODO : Check
+    if option == "A":
+        fopt = _optimize_single_start_a
+    elif option == "B":
+        fopt = _optimize_single_start_b
+    _param_opt = functools.partial(fopt,
+                    kernel = kernel,noisekernel = noisekernel,data=data,
+                    positives = positives,adjustable = adjustable,
+                    verbose = verbose, 
+                    penalize_runtime_error = penalize_runtime_error)
+    nll,hparams_new = _param_opt(hparams = hparams)
+    for i in range(1,num_starts):
+        hparams_test = _perturb(hparams,positives)
+        nll_test,hparams_test = _param_opt(hparams = hparams_test)
+        if nll_test < nll:
+            hparams_new = hparams_test
+        print(nll_test,hparams_new)
+    gpnew = GPObject(kernel,noisekernel,hparams_new,
+                              data)
+    return gpnew
+
+def _optimize_single_start_a(kernel,noisekernel,hparams,
+                             data,positives,adjustable=True,
+                             verbose=False,
+                             penalize_runtime_error = True):
+    #LBFG-S, with warping function sqrt    
+    xdata,ydata = data
+    for i,_ in enumerate(hparams): #Convert to tensor
+        hparams[i] = torch.tensor(hparams[i])
+    
+    def _negative_log_likelihood(hparams,positives):
+        hparams_feed = [None]*len(hparams)
+        for i,_ in enumerate(hparams):
+            if positives[i]:
+                hparams_feed[i] = hparams[i]**2
+            else:
+                hparams_feed[i] = hparams[i].clone()
+        if verbose:
+            print([h.item() for h in hparams_feed])
+        try:
+            gpnew = GPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = -gpnew.loglikelihood
+        except RuntimeError:
+            result = 1e12 + sum(hparams_feed)
+        if verbose:
+            print(result.item())
+            print("-"*10)
+        return result
+    
+    if adjustable == True:
+        adjustable = True*len(positives)
+    #Adjust hparams so we can differentiate
+    hparams_new = []
+    for i,hparam in enumerate(hparams):
+        #TODO : Put adjustable here
+        hparam_new = hparam.clone()
+        if positives[i]: #TODO : Check
+            hparam_new = torch.sqrt(hparam).clone()
+        hparam_new.requires_grad_()
+        hparams_new.append(hparam_new)
+    #Optmizer
+    optimizer = torch.optim.LBFGS(hparams_new,max_iter=100)
+    optimizer.zero_grad()
+    def closure():
+        optimizer.zero_grad()
+        nll = _negative_log_likelihood(hparams_new,positives)
+        nll.backward(retain_graph=True)
+        return nll
+    nll = optimizer.step(closure)
+    #Create new gp
+    for i,_ in enumerate(hparams_new):
+        hparams_new[i].requires_grad = False
+        if positives[i]:
+            hparams_new[i] = hparams_new[i]**2
+    return nll.item(),hparams_new
+
+
+def _optimize_single_start_b(kernel,noisekernel,hparams,
+                             data,positives,adjustable=True,
+                             verbose=False,
+                             penalize_runtime_error = True):
+    #LBFG-S, with warping function log    
+    xdata,ydata = data
+    for i,_ in enumerate(hparams): #Convert to tensor
+        hparams[i] = torch.tensor(hparams[i])
+    
+    def _negative_log_likelihood(hparams,positives):
+        hparams_feed = [None]*len(hparams)
+        for i,_ in enumerate(hparams):
+            if positives[i]:
+                hparams_feed[i] = torch.exp(hparams[i])
+            else:
+                hparams_feed[i] = hparams[i].clone()
+        if verbose:
+            print([h.item() for h in hparams_feed])
+        try:
+            gpnew = GPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = -gpnew.loglikelihood
+        except RuntimeError:
+            result = 1e12 + sum(hparams_feed)
+        if verbose:
+            print(result.item())
+            print("-"*10)
+        return result
+    
+    if adjustable == True:
+        adjustable = True*len(positives)
+    #Adjust hparams so we can differentiate
+    hparams_new = []
+    for i,hparam in enumerate(hparams):
+        #TODO : Put adjustable here
+        hparam_new = hparam.clone()
+        if positives[i]: #TODO : Check
+            hparam_new = torch.log(hparam).clone()
+        hparam_new.requires_grad_()
+        hparams_new.append(hparam_new)
+    #Optmizer
+    optimizer = torch.optim.LBFGS(hparams_new,max_iter=100)
+    optimizer.zero_grad()
+    def closure():
+        optimizer.zero_grad()
+        nll = _negative_log_likelihood(hparams_new,positives)
+        nll.backward(retain_graph=True)
+        return nll
+    nll = optimizer.step(closure)
+    #Create new gp
+    for i,_ in enumerate(hparams_new):
+        hparams_new[i].requires_grad = False
+        if positives[i]:
+            hparams_new[i] = hparams_new[i]**2
+    return nll.item(),hparams_new
+
+
+def _perturb(hparams,positives,noise = 0.1):
+    hparams_perturb = [None]*len(hparams)
+    for i,p in enumerate(hparams):
+        if positives[i]:
+            hparams_perturb[i] = (np.sqrt(p) + noise*np.random.randn())**2
+        else:
+            hparams_perturb[i] = p + noise*np.random.randn()
+    return hparams_perturb
