@@ -112,21 +112,20 @@ class GPMarginGrid(object):
         m,C = _combine_predictions_single(self.rho_vector,m_list,C_list)
         return m,C
     
-    def _predict_batch(self,xs,retvar = True):
+    def _predict_batch(self,xs,retdiag = True):
         m_list = [None]*self.eta
         C_list = [None]*self.eta
         for i in range(self.eta):
             # Computes the posterior mean and variances for 
             # predictand y_star = y_tnew
-            m_i,C_i = self.gplist[i].predict_batch(xs)
+            m_i,C_i = self.gplist[i].predict_batch(xs,retdiag=False)
             m_list[i] = m_i
             C_list[i] = C_i
-        print(m_list,C_list)
         m,C = _combine_predictions_batch(self.rho_vector,m_list,C_list)
-        if not retvar:
+        if not retdiag:
             return m,C
         else:
-            return m,np.diag(C)
+            return m,np.diag(C).reshape(-1,1)
     
     def _check_initialized(self):
         if not self._initialized:
@@ -211,6 +210,7 @@ def _calculate_weights_term(phisamples,prior_variances,gp_length_scales,
 
 
 def _combine_predictions_single(rho_vector,m_list,C_list):
+    #TODO : May be wrong
     marray = np.array(m_list)
     Carray = np.array(C_list)
     m = np.average(marray,weights=rho_vector)
@@ -219,8 +219,8 @@ def _combine_predictions_single(rho_vector,m_list,C_list):
 
 
 def _combine_predictions_batch(rho_vector,m_list,C_list):
-    marray = np.array(m_list)
-    m = np.average(marray,weights=rho_vector,axis=0)
+    marray = np.hstack(m_list)
+    m = np.average(marray,weights=rho_vector,axis=1).reshape(-1,1)
     C = np.zeros_like(C_list[0])
     for i,_ in enumerate(C_list):
         C += (C_list[i] + np.outer(m_list[i],m_list[i]))*\

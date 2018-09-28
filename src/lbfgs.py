@@ -95,7 +95,8 @@ class LBFGS(Optimizer):
 
         # evaluate initial f(x) and df/dx
         orig_loss = closure()
-        loss = orig_loss.data[0]
+#        loss = orig_loss.data[0]
+        loss = orig_loss.item()
         current_evals = 1
         state['func_evals'] += 1
 
@@ -215,7 +216,8 @@ class LBFGS(Optimizer):
                 # re-evaluate function only if not in last iteration
                 # the reason we do this: in a stochastic setting,
                 # no use to re-evaluate that function here
-                loss = closure().data[0]
+#                loss = closure().data[0]
+                loss = closure().item()
                 flat_grad = self._gather_flat_grad()
                 abs_grad_sum = flat_grad.abs().sum()
                 ls_func_evals = 1
@@ -305,12 +307,14 @@ class LBFGS(Optimizer):
         w = 0.5
 
         original_param_data_list = self._copy_param()
-        phi_0 = closure().data[0]
+#        phi_0 = closure().data[0]
+        phi_0 = closure().item()
         phi_0_prime = self._directional_derivative(d)
         alpha_k = 1.0
         while True:
             self._set_param_incremental(alpha_k, d)
-            phi_k = closure().data[0]
+#            phi_k = closure().data[0]
+            phi_k = closure().item()
             self._set_param(original_param_data_list)
             if phi_k <= phi_0 + rho * alpha_k * phi_0_prime:
                 break
@@ -325,14 +329,16 @@ class LBFGS(Optimizer):
         t = 2.0
 
         original_param_data_list = self._copy_param()
-        phi_0 = closure().data[0]
+#        phi_0 = closure().data[0]
+        phi_0 = closure().item()
         phi_0_prime = self._directional_derivative(d)
         a_k = 0.0
         b_k = self._max_alpha(d)
         alpha_k = min(1e4, (a_k + b_k) / 2.0)
         while True:
             self._set_param_incremental(alpha_k, d)
-            phi_k = closure().data[0]
+#            phi_k = closure().data[0]
+            phi_k = closure().item()
             self._set_param(original_param_data_list)
             if phi_k <= phi_0 + rho*alpha_k*phi_0_prime:
                 if phi_k >= phi_0 + (1-rho)*alpha_k*phi_0_prime:
@@ -356,14 +362,16 @@ class LBFGS(Optimizer):
         sigma = 0.9
 
         original_param_data_list = self._copy_param()
-        phi_0 = closure().data[0]
+#        phi_0 = closure().data[0]
+        phi_0 = closure().item()
         phi_0_prime = self._directional_derivative(d)
         a_k = 0.0
         b_k = self._max_alpha(d)
         alpha_k = min(1e4, (a_k + b_k) / 2.0)
         while True:
             self._set_param_incremental(alpha_k, d)
-            phi_k = closure().data[0]
+#            phi_k = closure().data[0]
+            phi_k = closure().item()
             phi_k_prime = self._directional_derivative(d)
             self._set_param(original_param_data_list)
             if phi_k <= phi_0 + rho*alpha_k*phi_0_prime:

@@ -277,7 +277,6 @@ class CompoundKernel(Kernel):
         self.k1 = k1
         self.k2 = k2
         self.nhyper = k1.nhyper + k2.nhyper
-        self.dim = k1.dim + k2.dim
         self.hyperparams = None
         self.initialized = False
         
@@ -305,6 +304,7 @@ class Sum(CompoundKernel):
         Number of hyperparams : k1.hyper + k2.hyper
     """
     def __init__(self,k1,k2):
+        self.dim = max(k1.dim,k2.dim)
         super(Sum,self).__init__(k1,k2)
         
     def f(self,x,y):
@@ -317,6 +317,7 @@ class Prod(CompoundKernel):
         Number of hyperparams : k1.hyper + k2.hyper
     """
     def __init__(self,k1,k2):
+        self.dim = max(k1.dim,k2.dim)
         super(Prod,self).__init__(k1,k2)
 
     def f(self,x,y):
@@ -329,7 +330,8 @@ class DirectSum(CompoundKernel):
     """
     def __init__(self,k1,k2):
         super(DirectSum,self).__init__(k1,k2)
-        self.nm = k1.nhyper
+        self.dim = k1.dim + k2.dim
+        self.nm = k1.dim
         
     def f(self,x,y):
         return self.k1.f(x[:,:self.nm],y[:,:self.nm]) + \
@@ -342,6 +344,7 @@ class TensorProd(CompoundKernel):
     """
     def __init__(self,k1,k2):
         super(TensorProd,self).__init__(k1,k2)
+        self.dim = k1.dim + k2.dim
         self.nm = k1.dim
         
     def f(self,x,y):

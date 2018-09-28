@@ -8,10 +8,7 @@ from . import utils
 
 
 def choose_samples_grid(data,kernel,noisekernel,
-                        positives,hparams,center_first=True,
-                        alpha = 0.3,nmax = 5,
-                        default_prior_variance = 1.0,
-                        verbose=False):
+                        positives,bounds,hparams,**kwargs):
     """
         data : (xdata,ydata) tuple
         kernel : kernel
@@ -22,11 +19,16 @@ def choose_samples_grid(data,kernel,noisekernel,
         center_first : whether to find MLE first
     """
     assert len(positives) == len(hparams)
-    
+    center_first = kwargs.get("center_first",True)
+    alpha = kwargs.get("alpha",True)
+    nmax = kwargs.get("nmax",True)
+    default_prior_variance = kwargs.get("default_prior_variances",1.0)
+    verbose = kwargs.get("verbose",0)
+    kwargs["bounds"] = bounds
     if center_first:
         if verbose: print("Centering")
         gp = gpobject.GPObject(kernel,noisekernel,hparams,data)
-        gp = gp.optimize(positives,verbose=verbose)
+        gp = gp.optimize(option="B",**kwargs)
         hparams = gp.hparams
     else:
         hparams = [torch.tensor(p) for p in hparams]
@@ -44,9 +46,11 @@ def choose_samples_grid(data,kernel,noisekernel,
             hparams_feed[i] = torch.exp(hparam_new)
         else:
             hparams_feed[i] = hparam_new.clone()
-    hparams_scalar = [hp.item() for hp in gp.hparams]
     gp = gpobject.GPObject(kernel,noisekernel,hparams_feed,data)
+    hparams_scalar = [hp.item() for hp in gp.hparams]
     #Get second derivatives
+    if verbose >= 1:
+        print("Getting second derivatives")
     grads2 = []
     dl = torch.autograd.grad(gp.loglikelihood,hparams_new,
                              create_graph=True)
@@ -57,7 +61,8 @@ def choose_samples_grid(data,kernel,noisekernel,
             grads2.append(0.0)
         else:
             grads2.append(d2li.item())
-    if verbose: print("Getting second derivatives")
+    if verbose >= 2:
+        print(grads2)
     deltas = []
     prior_variances = []
     #Sample
@@ -69,6 +74,9 @@ def choose_samples_grid(data,kernel,noisekernel,
             sigma2 = -1/grad2
             deltas.append(np.sqrt(-sigma2*2*np.log(alpha)))
             prior_variances.append(sigma2)
+    if verbose >= 2:
+        print(prior_variances)
+        print(deltas)
     # TODO : Better final sampling strategy
     deltamax = max(deltas)
     hparamssamples = []
@@ -88,6 +96,7 @@ def choose_samples_grid(data,kernel,noisekernel,
             p2 = np.linspace(hparam,
                              hparam + deltas[i],
                              ni//2 + 1)
+        print(p1,p2)
         hparamssample = np.hstack([p1,p2])
         hparamssamples.append(hparamssample)
     return hparamssamples,prior_variances

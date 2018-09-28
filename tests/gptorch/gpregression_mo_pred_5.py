@@ -1,5 +1,6 @@
 import sys
 sys.path.append("../..")
+import time
 
 import numpy as np
 import torch
@@ -72,12 +73,16 @@ bounds = [(1e-4,1e4)]*3+[(-np.pi,np.pi)]*3 + [(1e-4,1e4)] + \
          [(1e-8,1e3)]*3
 #Kernel testing
 #xkern,ykern = torch.tensor(xtrain)
-gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Ydata))
-gp = gp.optimize(positives,verbose=True,num_starts = 1,
-                 option="C",bounds=bounds)
+gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xtrain,Ytrain))
+
+start_time = time.clock()
+gp = gp.optimize(option="B",verbose=0,num_starts = 1,
+                 bounds=bounds)
+end_time = time.clock()
+print(end_time - start_time)
 hparams = gp.showhparams()
 print(hparams)
-#gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Xdata))
+gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Ydata))
 
 T0 = np.hstack([0.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])
 T1 = np.hstack([1.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])
