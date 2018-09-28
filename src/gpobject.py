@@ -5,6 +5,7 @@ import functools
 import numpy as np
 import torch
 
+from . import lbfgs
 from . import utils
 from . import utilsla
 from . import utilstorch
@@ -140,7 +141,7 @@ class GPObject(object):
     def optimize(self,positives,adjustable=True,
                       num_starts = 1,verbose=False,
                       penalize_runtime_error = True,
-                      option = "A"):
+                      option = "A",bounds = None):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
@@ -156,7 +157,7 @@ class GPObject(object):
                                     positives,adjustable,
                                     num_starts,verbose,
                                     penalize_runtime_error,
-                                    option = option)
+                                    option = option,bounds=bounds)
 
     def _add_new_data(self,x_t,z_t):
         raise NotImplementedError
@@ -210,7 +211,8 @@ class GPObject(object):
     #Print functions
     def showhparams(self):
         return [hp.item() for hp in self.hparams]
-        
+
+
 #==============================================================================
 # Optimizer for GP
 #==============================================================================
@@ -221,7 +223,7 @@ def _optimize(kernel,noisekernel,hparams,
              data,positives,adjustable=True,
              num_starts = 1,verbose=False,
              penalize_runtime_error = True,
-             option = "A"):
+             option = "A",bounds=None):
     """
         Choose new parameters for the GP based on 
         MLE estimation.
@@ -237,6 +239,9 @@ def _optimize(kernel,noisekernel,hparams,
         fopt = _optimize_single_start_a
     elif option == "B":
         fopt = _optimize_single_start_b
+    elif option == "C":
+        fopt = functools.partial(_optimize_single_start_c,
+                                 bounds=bounds)
     _param_opt = functools.partial(fopt,
                     kernel = kernel,noisekernel = noisekernel,data=data,
                     positives = positives,adjustable = adjustable,
@@ -252,6 +257,7 @@ def _optimize(kernel,noisekernel,hparams,
     gpnew = GPObject(kernel,noisekernel,hparams_new,
                               data)
     return gpnew
+
 
 def _optimize_single_start_a(kernel,noisekernel,hparams,
                              data,positives,adjustable=True,
@@ -367,6 +373,63 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     return nll.item(),hparams_new
 
 
+def _optimize_single_start_c(kernel,noisekernel,hparams,
+                             data,positives,adjustable=True,
+                             verbose=False,
+                             penalize_runtime_error = True,
+                             bounds = None):
+    #LBFG-S, no warping, Chang Yong-Oh implementation, bounded
+    xdata,ydata = data
+    for i,_ in enumerate(hparams): #Convert to tensor
+        hparams[i] = torch.tensor(hparams[i])
+    for i,_ in enumerate(bounds):
+        bounds[i] = (torch.tensor(bounds[i][0]),
+                     torch.tensor(bounds[i][1]))
+    def _negative_log_likelihood(hparams,positives):
+        hparams_feed = [None]*len(hparams)
+        for i,_ in enumerate(hparams):
+            hparams_feed[i] = hparams[i].clone()
+        if verbose:
+            print([h.item() for h in hparams_feed])
+        try:
+            gpnew = GPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = -gpnew.loglikelihood
+        except RuntimeError:
+            result = 1e12 + sum(hparams_feed)
+        if verbose:
+            print(result.item())
+            print("-"*10)
+        return result
+    
+    if adjustable == True:
+        adjustable = True*len(positives)
+    #Adjust hparams so we can differentiate
+    hparams_new = []
+    for i,hparam in enumerate(hparams):
+        #TODO : Put adjustable here
+        hparam_new = hparam.clone()
+        hparam_new.requires_grad_()
+        hparams_new.append(hparam_new)
+    #Optmizer
+    optimizer = lbfgs.LBFGS(hparams_new,max_iter=100,bounds=bounds,
+                            line_search_fn = "backtracking")
+    optimizer.zero_grad()
+    def closure():
+        optimizer.zero_grad()
+        nll = _negative_log_likelihood(hparams_new,positives)
+        nll.backward(retain_graph=True)
+        return nll
+    nll = optimizer.step(closure)
+    #Create new gp
+    for i,_ in enumerate(hparams_new):
+        hparams_new[i].requires_grad = False
+    return nll.item(),hparams_new
+    
+
+#==============================================================================
+# AUXILIARY FUNCTIONS
+#==============================================================================
 def _perturb(hparams,positives,noise = 0.1):
     hparams_perturb = [None]*len(hparams)
     for i,p in enumerate(hparams):
