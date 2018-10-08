@@ -21,9 +21,9 @@ def binary_function_matrix(f,x):
 def binary_function_matrix_ret(f,x1,x2):
     """
         f : two argument kernel function
-        x1 : array
-        x2 : array
-        returns : n x n tensor M, where M[i,j] = f(l_i,l_j)
+        x1 : array with n rows
+        x2 : array with m rows
+        returns : n x m tensor M, where M[i,j] = f(l_i,l_j)
     """
     n = x1.shape[0]
     m = x2.shape[0]

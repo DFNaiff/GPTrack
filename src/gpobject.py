@@ -11,8 +11,18 @@ from . import utilsla
 from . import utilstorch
 
 
+#TODO : You may be holding K on memory without needing
 class GPObject(object):
     def __init__(self,kernel,noise_kernel,hparams,data = None):
+        """
+            kernel : kernel of the GP
+            noise_kernel : kernel of the GP noise
+            hparams : list of hyperparameters (size: kernel.nparams +
+                      noise_kernels.nparams)
+            data : (xdata,ydata) tuple, where xdata is a 
+                    (nsamples,nfeatures)-array and 
+                    ydata is a (nsamples,1)-array
+        """
         self._initialize_kernels(kernel,noise_kernel,hparams)
         self.change_data(data)
 
@@ -21,17 +31,19 @@ class GPObject(object):
             Calculate mean(x),var(x)
         """
         # TODO : add efficient update of r
+        # TODO : GIANT workaround here
         x = self._convert_input_single(x)
         kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
         s = torch.trtrs(kx,self.U,transpose=True)[0]
         mean = torch.matmul(s.transpose(1,0),self.z)
         if not getvar:
-            if return_as_numpy: return mean.numpy()
-            else: return mean
+            if return_as_numpy: return mean.numpy()[0][0]
+            else: return mean[0][0]
         else:
+            x = x.unsqueeze(0) # TODO : GIANT workaround here
             var = self.kernel.f(x,x) - torch.matmul(s.transpose(1,0),s)
-            if return_as_numpy: return mean.numpy(),var.numpy()
-            else: return mean,var
+            if return_as_numpy: return mean.numpy()[0][0],var.numpy()[0][0]
+            else: return mean[0][0],var[0][0]
     
     def predict_batch(self,x,getvar = True,return_as_numpy = True,
                        retdiag = True):
@@ -51,7 +63,7 @@ class GPObject(object):
             var = utilstorch.binary_function_matrix(self.kernel.f,x) - \
                   torch.matmul(s.transpose(1,0),s)
             if retdiag:
-                var = torch.diag(var)
+                var = torch.diag(var).reshape(-1,1)
             if return_as_numpy: return mean.numpy(),var.numpy()
             else: return mean,var
     
@@ -61,78 +73,86 @@ class GPObject(object):
         """
         # TODO : assertions
         x,y = data
-        self.xdata = torch.tensor(x)
-        self.ydata = torch.tensor(y)
-        self.numdata = x.shape[0]
-        self.dimdata = x.shape[1]
+#        assert x.shape[0] == y.shape[0]
+        self.xdata = torch.tensor(x).float()
+        self.ydata = torch.tensor(y).float()
+        self.numdata = self.xdata.shape[0]
+        self.dimdata = self.xdata.shape[1]
         self.K = utilstorch.binary_function_matrix(self.kernel.f,
                                                    self.xdata)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
             Idiag = self.noisekernel.fdiag(self.xdata)
             I = torch.diag(Idiag)
-            self.K = self.K + I
         else:
             I = self.noisekernel.fdiag(self.xdata)
+        self.K = self.K + I
         self.U = torch.potrf(self.K)
         self._update_likelihood()
         self.is_empty = False
         
     def downdate(self,i=0):
-        raise NotImplementedError
-        # TODO : do not simply downdate likelihood
-        self.K = utilsla.contract(self.K,i)
-        self.U = utilsla.contract_cholesky(self.U,i)
-        self.xdata = self.xdata[:i] + self.xdata[i+1:]
+        # TODO : Find a way to not pass through numpy
+        self.K = torch.tensor(utilsla.contract(self.K.numpy(),i)).float()
+        self.U = torch.tensor(utilsla.contract_cholesky(
+                              self.U.numpy().astype(np.float),i)).float()
         # TODO : surely there's a function for dropping
-        self.ydata = np.concatenate([self.ydata[:i],
-                                     self.ydata[i+1:]])
+        self.xdata = torch.cat([self.xdata[:i,:],self.xdata[i+1:,:]])
+        self.ydata = torch.cat([self.ydata[:i],self.ydata[i+1:]])
+        self.numdata = self.numdata - 1
         self._update_likelihood()
     
-    def downdate_batch(self,drop_inds,is_sorted = True):
-        raise NotImplementedError
+    def downdate_batch(self,drop_inds,is_sorted = False):
+        """
+            drop_inds = list of indexes to be dropped
+        """
         # TODO : not clear whether there is a simple and more efficient way
         #        to downdate. But think of one
-        # Assumes drop_inds to be sorted
         if not is_sorted:
             drop_inds = sorted(drop_inds)
         for ind in drop_inds[::-1]:
             self.downdate(ind)
-            
-    def update(self,new_data):
-        raise NotImplementedError
-        """
-            Updates data, covariance matrix and it's cholesky factor, 
-            and likelihood
-        """
-        x_t,z_t = new_data
-        self._add_new_data(x_t,z_t)  
-    
+
     def update_batch(self,new_data_batch):
-        raise NotImplementedError
         """
-            x_t = [x_t1,x_t2,...,x_tn] list of inputs
-            z_t = [x_t1,x_t2,...,x_tn] list of outputs
+            new_data_batch : (xdata,ydata) tuple, where xdata is a 
+                             (nsamples,nfeatures)-array and 
+                             ydata is a (nsamples,1)-array
         """
         #TODO : Assertions
-        if self.is_empty:
-            self.change_data(new_data_batch)
+        x_new,y_new = new_data_batch
+        x_new = torch.tensor(x_new).float()
+        y_new = torch.tensor(y_new).float()
+#        assert x_new.shape[0] == y_new.shape[0]
+        num_new = x_new.shape[0]
+        self.numdata = self.numdata + num_new
+#        print(self.xdata.shape)
+#        print(x_new.shape)
+        V = utilstorch.binary_function_matrix_ret(self.kernel.f,self.xdata,x_new)
+#        C = utils.binary_function_matrix(self.cov,x_t) #K(Xnew,Xnew)
+        C = utilstorch.binary_function_matrix(self.kernel.f,x_new)
+        if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
+            Idiag = self.noisekernel.fdiag(x_new)
+            I = torch.diag(Idiag)
         else:
-            x_t,z_t = new_data_batch
-            num_new = len(x_t)
-            self.numdata = self.numdata + num_new
-            V = np.vstack([utils.relation_array(self.cov,x_ti,self.xdata) 
-                           for x_ti in x_t]).transpose() #K(Xnew,Xold)
-            C = utils.binary_function_matrix(self.cov,x_t) #K(Xnew,Xnew)
-            if self.noisekernel.is_diagonal: #K(Xnew,Xnew) + sigma^2*I
-                I = np.diag([self.noisecov(xx,xx) for xx in x_t])
-                C = C + I
-            else:
-                raise NotImplementedError
-            self.K = utilsla.expand_symmetric_with_matrix(self.K,V,C) #K
-            self.U = utilsla.expand_cholesky_with_matrix(self.U,V,C) #cholesky factor
-            self.xdata += x_t
-            self.ydata = np.hstack([self.ydata,np.array(z_t)])
-            self._update_likelihood()
+            I = self.noisekernel.fdiag(x_new)
+        C = C + I
+
+#        if self.noisekernel.is_diagonal: #K(Xnew,Xnew) + sigma^2*I
+#            I = np.diag([self.noisecov(xx,xx) for xx in x_t])
+#            C = C + I
+#        else:
+#            raise NotImplementedError
+        self.K = torch.tensor(utilsla.expand_symmetric_with_matrix(self.K.numpy(),
+                                                                   V.numpy(),
+                                                                   C.numpy())).float() #K
+        self.U = torch.tensor(utilsla.expand_cholesky_with_matrix(self.U.numpy(),
+                                                                   V.numpy(),
+                                                                   C.numpy())).float() #K
+#        print(self.xdata)
+#        print(x_new)
+        self.xdata = torch.cat([self.xdata,x_new])
+        self.ydata = torch.cat([self.ydata,y_new])
+        self._update_likelihood()
     
     def optimize(self,option="B",**kwargs):
         """
@@ -155,18 +175,6 @@ class GPObject(object):
         return _optimize(self.kernel,self.noisekernel,
                          self.hparams,(self.xdata,self.ydata),
                          option,**kwargs)
-
-    def _add_new_data(self,x_t,z_t):
-        raise NotImplementedError
-        self.numdata = self.numdata + 1
-        v = utils.relation_array(self.cov,x_t,self.xdata) #k(xnew,Xold)
-        c = self.cov(x_t,x_t) #k(xnew,xnew)
-        c = c + self.noisecov(x_t,x_t) #k(xnew,xnew) + sigma^2
-        self.K = utilsla.expand_symmetric(self.K,v,c) #K
-        self.U = utilsla.expand_cholesky(self.U,v,c) #cholesky factor
-        self.xdata.append(x_t)
-        self.ydata = np.append(self.ydata,z_t)
-        self._update_likelihood()
         
     def _initialize_kernels(self,kernel,noisekernel,hparams):
         self.hparams = [None]*len(hparams)

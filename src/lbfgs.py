@@ -53,6 +53,8 @@ class LBFGS(Optimizer):
 
         self._params = self.param_groups[0]['params']
         self._bounds = [(None, None)] * len(self._params) if bounds is None else bounds
+#        print(self._bounds)
+#        print("ok")
         self._numel_cache = None
 
     def _numel(self):
@@ -208,16 +210,24 @@ class LBFGS(Optimizer):
                     t = self._goldstein(closure, d)
                 elif line_search_fn == 'backtracking':
                     t = self._backtracking(closure, d)
+#                print(t,'linesearch')
+#                print([dd.item() for dd in d])
+#                print([p.item() for p in self._params])
+#                print([(p + t*dd).item() for p,dd in zip(self._params,d)])
+#                print(d)
                 self._add_grad(t, d)
             else:
                 # no line search, simply move with fixed-step
                 self._add_grad(t, d)
+#            print([p.item() for p in self._params])
+#            print("new value checking")
             if n_iter != max_iter:
                 # re-evaluate function only if not in last iteration
                 # the reason we do this: in a stochastic setting,
                 # no use to re-evaluate that function here
 #                loss = closure().data[0]
                 loss = closure().item()
+#                print(loss)
                 flat_grad = self._gather_flat_grad()
                 abs_grad_sum = flat_grad.abs().sum()
                 ls_func_evals = 1
@@ -298,6 +308,8 @@ class LBFGS(Optimizer):
                 from_u_bnd = ((u_bnd-p.data)/p_grad)[p_grad>0]
                 min_u_bnd = torch.min(from_u_bnd) if from_u_bnd.numel() > 0 else max_alpha
             max_alpha = min(max_alpha, min_l_bnd, min_u_bnd)
+            offset += numel
+#        print(max_alpha,'max_alpha')
         return max_alpha
 
 

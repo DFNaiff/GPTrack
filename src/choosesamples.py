@@ -8,7 +8,7 @@ from . import utils
 
 
 def choose_samples_grid(data,kernel,noisekernel,
-                        positives,bounds,hparams,**kwargs):
+                        positives,hparams,**kwargs):
     """
         data : (xdata,ydata) tuple
         kernel : kernel
@@ -17,6 +17,7 @@ def choose_samples_grid(data,kernel,noisekernel,
                      list of positive hyperparameters
         hparams : initial hyperparameters
         center_first : whether to find MLE first
+        kwargs accepts gp.optimize parameters (with option = "B")
     """
     assert len(positives) == len(hparams)
     center_first = kwargs.get("center_first",True)
@@ -24,7 +25,6 @@ def choose_samples_grid(data,kernel,noisekernel,
     nmax = kwargs.get("nmax",True)
     default_prior_variance = kwargs.get("default_prior_variances",1.0)
     verbose = kwargs.get("verbose",0)
-    kwargs["bounds"] = bounds
     if center_first:
         if verbose: print("Centering")
         gp = gpobject.GPObject(kernel,noisekernel,hparams,data)
@@ -32,35 +32,17 @@ def choose_samples_grid(data,kernel,noisekernel,
         hparams = gp.hparams
     else:
         hparams = [torch.tensor(p) for p in hparams]
+    if verbose >= 2:
+        print("Parameters of center:")
+        print(hparams)
     #Extremely inneficient to make ANOTHER gp here
     #Adjust hparams so we can get second derivatives
-    hparams_new = [None]*len(hparams)
-    hparams_feed = [None]*len(hparams)
-    for i,hparam in enumerate(hparams):
-        hparam_new = hparam.clone()
-        if positives[i]: #Sample from logarithm
-            hparam_new = torch.log(hparam).clone()
-        hparam_new.requires_grad_() #Allow backprop
-        hparams_new[i] = hparam_new
-        if positives[i]: #Go back to exp in feeding GP
-            hparams_feed[i] = torch.exp(hparam_new)
-        else:
-            hparams_feed[i] = hparam_new.clone()
-    gp = gpobject.GPObject(kernel,noisekernel,hparams_feed,data)
-    hparams_scalar = [hp.item() for hp in gp.hparams]
+    gp,hparams_new,hparams_scalar = _set_gp_with_grad(kernel,noisekernel,
+                                                      data,hparams,positives)
     #Get second derivatives
     if verbose >= 1:
         print("Getting second derivatives")
-    grads2 = []
-    dl = torch.autograd.grad(gp.loglikelihood,hparams_new,
-                             create_graph=True)
-    for i,p in enumerate(hparams_new):
-        d2li = torch.autograd.grad(dl[i],p,allow_unused=True,
-                                   retain_graph = True)[0]
-        if type(d2li) == type(None):
-            grads2.append(0.0)
-        else:
-            grads2.append(d2li.item())
+    grads2 = _get_grads2(gp,hparams_new)
     if verbose >= 2:
         print(grads2)
     deltas = []
@@ -77,7 +59,96 @@ def choose_samples_grid(data,kernel,noisekernel,
     if verbose >= 2:
         print(prior_variances)
         print(deltas)
+    hparamssamples = _laplace_grid_sampling(hparams_scalar,deltas,
+                                            positives,nmax)
     # TODO : Better final sampling strategy
+    return hparamssamples,prior_variances
+
+
+def choose_samples_laplace_a(data,kernel,noisekernel,
+                             positives,hparams,**kwargs):
+    """
+        data : (xdata,ydata) tuple
+        kernel : kernel
+        noisekernel : noisekernel
+        positives : [bool]*(kernel.nhyper + noisekernel.nhyper)
+                     list of positive hyperparameters
+        hparams : initial hyperparameters
+        center_first : whether to find MLE first
+        kwargs accepts gp.optimize parameters (with option = "B")
+    """
+    assert len(positives) == len(hparams)
+    center_first = kwargs.get("center_first",True)
+    num_samples = kwargs.get("num_samples",True)
+    default_prior_variance = kwargs.get("default_prior_variances",1.0)
+    verbose = kwargs.get("verbose",0)
+    num_params = len(hparams)
+    if center_first:
+        if verbose: print("Centering")
+        gp = gpobject.GPObject(kernel,noisekernel,hparams,data)
+        gp = gp.optimize(option="B",**kwargs)
+        hparams = gp.hparams
+    else:
+        hparams = [torch.tensor(p) for p in hparams]
+    if verbose >= 2:
+        print("Parameters of center:")
+        print(hparams)
+    #Extremely inneficient to make ANOTHER gp here
+    #Adjust hparams so we can get second derivatives
+    gp,hparams_new,hparams_scalar = _set_gp_with_grad(kernel,noisekernel,
+                                                      hparams,positives)
+    #Get second derivatives
+    if verbose >= 1:
+        print("Getting hessian")
+    hessian = _get_hessian(gp,hparams_new,num_params)
+    if verbose >= 2:
+        print(hessian)
+    prior_variances = []
+    #Sample
+    for i,_ in enumerate(hparams_scalar):
+        if hessian[i][i] >= 0: #Some error in grad2 calculation. Abort
+            prior_variances.append(default_prior_variance)
+        else:
+            sigma2 = -1/hessian[i][i]
+            prior_variances.append(sigma2)
+    if verbose >= 2:
+        print(prior_variances)
+    # TODO : Better final sampling strategy
+    
+    return hparamssamples,prior_variances
+
+
+def _get_grads2(gp,hparams):
+    grads2 = []
+    dl = torch.autograd.grad(gp.loglikelihood,hparams,
+                             create_graph=True)
+    for i,p in enumerate(hparams):
+        d2li = torch.autograd.grad(dl[i],p,allow_unused=True,
+                                   retain_graph = True)[0]
+        if type(d2li) == type(None):
+            grads2.append(0.0)
+        else:
+            grads2.append(d2li.item())
+    return np.array(grads2)
+
+
+def _get_hessian(gp,hparams,num_params):
+    #TODO : Far to inefficient
+    hessian = [[None]*num_params]*num_params
+    dl = torch.autograd.grad(gp.loglikelihood,hparams,
+                             create_graph=True)
+    for i,_ in enumerate(hparams):
+        for j,pj in enumerate(hparams):
+            d2lij = torch.autograd.grad(dl[i],pj,allow_unused=True,
+                                        retain_graph = True)[0]
+            if type(d2lij) == type(None):
+                hessian[i][j] = 0.0
+            else:
+                hessian[i][j] = d2lij.item()
+    return np.array(hessian)
+
+
+def _laplace_grid_sampling(hparams_scalar,deltas,positives,nmax):
     deltamax = max(deltas)
     hparamssamples = []
     for i,hparam in enumerate(hparams_scalar):
@@ -96,12 +167,29 @@ def choose_samples_grid(data,kernel,noisekernel,
             p2 = np.linspace(hparam,
                              hparam + deltas[i],
                              ni//2 + 1)
-        print(p1,p2)
         hparamssample = np.hstack([p1,p2])
         hparamssamples.append(hparamssample)
-    return hparamssamples,prior_variances
+    return hparamssamples
 
 
+def _set_gp_with_grad(kernel,noisekernel,data,hparams,positives):
+    #hparams_new,hparams_scalar returns the LOGARITHM of 
+    #hyperparameters, if positives[i]
+    hparams_new = [None]*len(hparams)
+    hparams_feed = [None]*len(hparams)
+    for i,hparam in enumerate(hparams):
+        hparam_new = hparam.clone()
+        if positives[i]: #Sample from logarithm
+            hparam_new = torch.log(hparam).clone()
+        hparam_new.requires_grad_() #Allow backprop
+        hparams_new[i] = hparam_new
+        if positives[i]: #Go back to exp in feeding GP
+            hparams_feed[i] = torch.exp(hparam_new)
+        else:
+            hparams_feed[i] = hparam_new.clone()
+    gp = gpobject.GPObject(kernel,noisekernel,hparams_feed,data)
+    hparams_scalar = [hp.item() for hp in gp.hparams]
+    return gp,hparams_new,hparams_scalar
 #def choose_samples_langevin(data,kernel,noisekernel,
 #                        sampleables,positives,phi0,
 #                        center_first = True,

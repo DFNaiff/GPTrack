@@ -73,8 +73,8 @@ bounds = [(1e-4,1e4)]*3+[(-np.pi,np.pi)]*3 + [(1e-4,1e4)] + \
 #Kernel testing
 #xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Ydata))
-gp = gp.optimize(positives,verbose=True,num_starts = 1,
-                 option="C",bounds=bounds)
+gp = gp.optimize("B",positives,verbose=True,num_starts = 1,
+                 bounds=bounds)
 hparams = gp.showhparams()
 print(hparams)
 #gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xdata,Xdata))
