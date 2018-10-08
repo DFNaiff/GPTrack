@@ -113,8 +113,9 @@ def choose_samples_laplace_a(data,kernel,noisekernel,
             prior_variances.append(sigma2)
     if verbose >= 2:
         print(prior_variances)
-    # TODO : Better final sampling strategy
-    
+    hparamssamples = np.random.multivariate_normal(mean=np.zeros(num_params),
+                                                   cov=hessian,
+                                                   size=num_samples)
     return hparamssamples,prior_variances
 
 

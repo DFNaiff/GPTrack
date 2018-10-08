@@ -73,7 +73,6 @@ class GPObject(object):
         """
         # TODO : assertions
         x,y = data
-#        assert x.shape[0] == y.shape[0]
         self.xdata = torch.tensor(x).float()
         self.ydata = torch.tensor(y).float()
         self.numdata = self.xdata.shape[0]
@@ -122,13 +121,9 @@ class GPObject(object):
         x_new,y_new = new_data_batch
         x_new = torch.tensor(x_new).float()
         y_new = torch.tensor(y_new).float()
-#        assert x_new.shape[0] == y_new.shape[0]
         num_new = x_new.shape[0]
         self.numdata = self.numdata + num_new
-#        print(self.xdata.shape)
-#        print(x_new.shape)
         V = utilstorch.binary_function_matrix_ret(self.kernel.f,self.xdata,x_new)
-#        C = utils.binary_function_matrix(self.cov,x_t) #K(Xnew,Xnew)
         C = utilstorch.binary_function_matrix(self.kernel.f,x_new)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
             Idiag = self.noisekernel.fdiag(x_new)
@@ -137,19 +132,12 @@ class GPObject(object):
             I = self.noisekernel.fdiag(x_new)
         C = C + I
 
-#        if self.noisekernel.is_diagonal: #K(Xnew,Xnew) + sigma^2*I
-#            I = np.diag([self.noisecov(xx,xx) for xx in x_t])
-#            C = C + I
-#        else:
-#            raise NotImplementedError
         self.K = torch.tensor(utilsla.expand_symmetric_with_matrix(self.K.numpy(),
                                                                    V.numpy(),
                                                                    C.numpy())).float() #K
         self.U = torch.tensor(utilsla.expand_cholesky_with_matrix(self.U.numpy(),
                                                                    V.numpy(),
                                                                    C.numpy())).float() #K
-#        print(self.xdata)
-#        print(x_new)
         self.xdata = torch.cat([self.xdata,x_new])
         self.ydata = torch.cat([self.ydata,y_new])
         self._update_likelihood()
@@ -292,8 +280,6 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     for i,_ in enumerate(bounds):
         bounds[i] = (torch.tensor(bounds[i][0]),
                      torch.tensor(bounds[i][1]))
-    print(bounds)
-    print(hparams)
     def _negative_log_likelihood(hparams):
         hparams_feed = [None]*len(hparams)
         for i,_ in enumerate(hparams):
