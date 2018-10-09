@@ -203,7 +203,7 @@ def _combine_predictions_batch(weights_term,
                                      m_list,C_list):
     n = len(loglikelihoods)
     d = len(m_list[0])
-    print(loglikelihoods)
+#    print(loglikelihoods)
     loglikelihoods = loglikelihoods - np.max(loglikelihoods) #To avoid overflow
     likelihoods = np.exp(loglikelihoods).reshape(-1,1)
     m_array = np.transpose(np.hstack(m_list))
@@ -211,8 +211,8 @@ def _combine_predictions_batch(weights_term,
     lD_array = np.linalg.slogdet(C_array)[1].reshape(-1,1)
     I_array = np.linalg.inv(C_array)
     #Tile and repeat trick
-    print(C_array)
-    print(lD_array)
+#    print(C_array)
+#    print(lD_array)
     M1 = np.repeat(m_array,n,axis=0)
     M2 = np.tile(m_array,[n,1])
     C1 = np.repeat(C_array,n,axis=0)
@@ -239,8 +239,9 @@ def _combine_predictions_batch(weights_term,
     #Means
     M1b,M2b = M1.reshape(n**2,d,1),M2.reshape(n**2,d,1)
     invsumcov2 = np.linalg.inv(I1 + I2)
-    M = np.matmul(invsumcov2,np.matmul(C1,M1b) + \
-                  np.matmul(C2,M2b)).reshape(n**2,d)
+    M = np.matmul(invsumcov2,np.matmul(I1,M1b) + \
+                  np.matmul(I2,M2b)).reshape(n**2,d)
+#    print(M)
     mean = np.sum(w*M,axis=0).reshape(-1,1)
     #Covariances
     covterm = 2*invsumcov2*np.matmul(M.reshape(n**2,d,1),
@@ -264,6 +265,47 @@ def _get_prior_means(phisamples,positives):
 #==============================================================================
 # DEPECRATED FOR NOW 
 #==============================================================================
+def _combine_predictions_batch2(weights_term,
+                                     loglikelihoods,
+                                     m_list,C_list):
+    #TODO : Eficiency
+    m_list = [m.flatten() for m in m_list]     
+    loglikelihoods = loglikelihoods - np.max(loglikelihoods) #To avoid overflow
+    likelihoods = np.exp(loglikelihoods)
+    N = len(likelihoods)
+    iterator = itertools.product(range(N),range(N))
+    sum_weights = 0.0
+    mean = 0.0
+    cov = 0.0
+    for i,j in iterator:
+        weight = _make_weight(m_list[i],m_list[j],
+                             C_list[i],C_list[j],
+                             likelihoods[i],likelihoods[j],
+                             weights_term[i][j])
+        invcov_i = utilsla.spla.inv(C_list[i])
+        invcov_j = utilsla.spla.inv(C_list[j])
+        covij = utilsla.spla.inv(invcov_i + invcov_j)
+        meanij = np.matmul(covij,(np.matmul(invcov_i,m_list[i]) + \
+                                  np.matmul(invcov_j,m_list[j])))
+        print(meanij)
+        mean += weight*meanij
+        cov += weight*(covij + np.outer(meanij,meanij))
+        sum_weights += weight
+    mean = mean/sum_weights
+    cov = cov/sum_weights - np.outer(mean,mean)
+    return mean,cov
+
+
+def _make_weight(mi,mj,covi,covj,li,lj,Mij):
+    C = (utilsla.spla.det(covi)*utilsla.spla.det(covj))**(0.25)
+    D = 1.0/np.sqrt(utilsla.spla.det(covi + covj))*\
+        np.exp(-0.25*utilsla.bilinear_form(mi - mj,
+                                          utilsla.spla.inv(covi + covj),
+                                          mi - mj))
+#    print(C*D,np.sqrt(li*lj),Mij)
+    result = C*D*np.sqrt(li*lj)*Mij
+    return result
+
 def _calculate_weights_term_old(phisamples,positives,
                             gp_length_scales=1.0,
                             prior_means=0.0,prior_variances=20.0,

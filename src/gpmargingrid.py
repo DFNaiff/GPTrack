@@ -17,47 +17,49 @@ from . import utilsla
 # Environmental Sensor Network Data using
 # Bayesian Gaussian Processes", M. A. Osborne, S. J. Roberts
 #
+
+#TODO : Renaming. phi_anything should be hparams_anything
 class GPMarginGrid(object):
-    def __init__(self,kernel,phisamples,positives,
-                      weights_term_construction = "new",
-                      prior_variances = 1.0,gp_length_scales = 1.0,
-                      noisekernel = "DEFAULT",verbose=1,
-                      data=None):
+    def __init__(self,kernel,phisamples,positives,data,
+                      **kwargs):
         """
             kernel : kernel of the GPs
+            phisamples : if weights_term_construction = "grid":
+                             list of samples for each hyperparameter dimension, 
+                             [[phi_1^(1),...,phi_1^(m_1)],...,
+                               [phi_n^(1),...,phi_n^(m_n)]]
+                              where n = kernel.nhyper + noisekernel.nhyper
+                              if weights_term_construction = "nongrid":
+                              [phi_1,...,phi_n],
+                              with phi_i = [phi_i^(1),...,phi_i^(n)]
+                              where n = kernel.nhyper + noisekernel.nhyper
+            positives : [bool]*n list of positives hyperparameters
+            data : data supplied to GP. If supplied, has to be of the form
+                   [xdata,zdata], where xdata,zdata are two lists of data.
+                   If None, kernel is considered to not be initialized.
             noisekernel : kernel for the noise. If "DEFAULT", 
                           IIDKernel is chosen
-            phisamples : list of samples for each hyperparameter dimension, 
-                         [[phi_1^(1),...,phi_1^(m_1)],...,
-                          [phi_n^(1),...,phi_n^(m_n)]]
-                         where n = kernel.nhyper + noisekernel.nhyper
-            positives : [bool]*n list of positives hyperparameters
-            adjustable : [bool]*n list of hyperparameters to be adjusted
-            weights_term_construction : "new" or "old", depending on how to 
-                                        construct
+            weights_term_construction : "grid" or "nongrid", depending on how to 
+                                        construct. Default: "grid"
             prior_variances : a (positive) scalar or array
             gp_length_scales : a (positive) scalar or "ESTIMATE"
             verbose : degree of verbosity
-            data : data supplied to GP. If supplied, has to be of the form
-                   [xdata,zdata], where xdata,zdata are two lists of data, 
-                   and each data in xdata if a 2-elements list with 
-                   the first element is a (integer) number corresponding 
-                   to the (ith+1)-output. If None, kernel is 
-                   considered to not be initialized.
         """
         self.kernel = kernel
+        noisekernel = kwargs.get("noisekernel","DEFAULT")
         if noisekernel == "DEFAULT":
             self.noisekernel = kernels.IIDNoiseKernel()
         else:
             self.noisekernel = noisekernel
         self.phisamples = phisamples
         self.positives = positives
-        self.weights_term_construction = weights_term_construction
-        self.prior_variances = prior_variances
-        self.gp_length_scales = gp_length_scales
-        self.verbose = verbose
+        self.weights_term_construction = kwargs.get("weights_term_construction",
+                                                    "grid")
+        self.prior_variances = kwargs.get("prior_variances",1.0)
+        self.gp_length_scales = kwargs.get("gp_length_scales",1.0)
+        self.verbose = kwargs.get("verbose",0)
         if data:
-            self.initialize(data)
+            self.initialize(data,self.weights_term_construction)
         else:
             self._initialized = False
             
@@ -75,26 +77,41 @@ class GPMarginGrid(object):
         else:
             return self._predict_batch(xs)
     
-    def initialize(self,data):
+    def initialize(self,data,weights_term_construction):
         #Total number of samples
-        self.eta = np.product([len(phisample) 
-                               for phisample in self.phisamples])
-        self.prior_means = _get_prior_means(self.phisamples,
-                                            self.positives)
-
+        if weights_term_construction == "grid": #Grid parameters were supplied
+            self.eta = np.product([len(phisample) 
+                                   for phisample in self.phisamples])
+            self.prior_means = _get_prior_means(self.phisamples,
+                                                self.positives)
+        elif weights_term_construction == "nongrid":
+            self.eta = len(self.phisamples)
+            phigrid = list(np.array(self.phisamples).transpose())
+            self.prior_means = _get_prior_means(phigrid,
+                                                self.positives)
+        else:
+            raise TypeError
         self.xdata = copy.copy(data[0])
         self.zdata = copy.copy(data[1])
         if self.verbose >= 1:
             print("Setting GPS")
-        self._set_gps([self.xdata,self.zdata])
+        self._set_gps([self.xdata,self.zdata],weights_term_construction)
         # Calculate the weights
         if self.verbose >= 1:
             print("Calculating weight terms")
-        self.weights_term = _calculate_weights_term(self.phisamples,
-                                                   self.prior_variances,
-                                                   self.gp_length_scales,
-                                                   self.positives,
-                                                   self.prior_means)
+        if weights_term_construction == "grid":
+            self.weights_term = _calculate_weights_term_grid(self.phisamples,
+                                                             self.prior_variances,
+                                                             self.gp_length_scales,
+                                                             self.positives,
+                                                             self.prior_means)
+        elif weights_term_construction == "nongrid":
+            self.weights_term = _calculate_weights_term_nongrid(self.phisamples,
+                                                                self.prior_variances,
+                                                                self.gp_length_scales,
+                                                                self.positives,
+                                                                self.prior_means)
+
         self._determine_weights_vector()
         if self.verbose >= 1 : 
             print("Initialized")
@@ -132,9 +149,12 @@ class GPMarginGrid(object):
             raise TypeError #TODO : Change error
     
     #Initialization parameters
-    def _set_gps(self,data):
+    def _set_gps(self,data,weights_term_construction):
         self.gplist = [None]*self.eta
-        phiiter = itertools.product(*self.phisamples)
+        if weights_term_construction == "grid":
+            phiiter = itertools.product(*self.phisamples)
+        elif weights_term_construction == "nongrid":
+            phiiter = self.phisamples
         for i,phisample in enumerate(phiiter):
             phisample = np.array(phisample)
             # Supply ith gaussian process with the mean function meanfunc 
@@ -147,7 +167,52 @@ class GPMarginGrid(object):
 #==============================================================================
 # AUXILIARY FUNCTIONS
 #==============================================================================
-def _calculate_weights_term(phisamples,prior_variances,gp_length_scales,
+def _calculate_weights_term_nongrid(phisamples,prior_variances,gp_length_scales,
+                                    positives,prior_means=0.0):
+    #TODO : Check whether Osborne's weight calculation is correct.
+    #       To elaborate: The integral you've calculated should
+    #       be the same as his. But maybe he's wrong (or it should 
+    #       not be the same)
+    """
+        Calculates the weight term matrix without grid 
+        phisamples : [phi_1,...,phi_eta] list of hyperparameters samples,
+                     where phi_i = [phi_i^1,...,phi_i^n]
+        prior_variances : a (positive) scalar (LATER: also arrays)
+        gp_length_scales : a (positive) scalar (LATER: also arrays)
+        positives : [bool]*n list of parameters that are positive
+        prior_means : a scalar or n-sized array
+        returns a m_1*...*m_n sized square matrix
+    """
+    eta = len(phisamples)
+    n = len(phisamples[0])
+    phisamplestr = [None]*eta
+    for i,phisample in enumerate(phisamples):
+        # Apply log to positive hyperparameters
+        phisampletr = phisample.copy()
+        phisampletr[positives] = np.log(phisample[positives])
+        phisamplestr[i] = phisampletr
+    if type(gp_length_scales) != np.ndarray: # A scalar was supplied
+        gp_length_scales = gp_length_scales*np.ones(n)
+    if type(prior_variances) != np.ndarray: # A scalar was supplied
+        prior_variances = prior_variances*np.ones(n)
+    if type(prior_means) != np.ndarray: # A scalar was supplied
+        prior_means = prior_means*np.ones(n)
+    # Multivariate normal used for W
+    # TODO: change for more efficient manner
+    l2 = gp_length_scales**2
+    C = utilsla.block([[np.diag(prior_variances + l2),np.diag(prior_variances)],
+                       [np.diag(prior_variances),np.diag(prior_variances + l2)]])
+    mvn = spstats.multivariate_normal(mean = np.hstack([prior_means]*2),
+                                      cov=C)
+    wfunc = lambda phi_i,phi_j : mvn.pdf(np.hstack([phi_i,phi_j]))
+    kfunc = functools.partial(utils.sqexp,l=gp_length_scales)
+    K = utils.binary_function_matrix(kfunc,phisamplestr)
+    U = utilsla.spla.cholesky(K,lower=False)
+    W = utils.binary_function_matrix(wfunc,phisamplestr)
+    return W,U
+
+
+def _calculate_weights_term_grid(phisamples,prior_variances,gp_length_scales,
                            positives,prior_means=0.0):
     """
         Calculates the weight term matrix (actually, returns 
@@ -243,8 +308,10 @@ def _determine_weights(weights_term,gplist):
     rho = utilsla.invumatmul(U,likelihoods,trans="N")
     #Zero out negative terms
     rho[rho<=0] = 0
-    if max(rho) == 0:
+    if sum(rho) == 0:
         raise ValueError("All weight terms where negative")
+#    if sum(rho) <= 0:
+#        raise ValueError("Weights term summed up to nonpositive")
     rho = rho/np.sum(rho)
     return rho
 

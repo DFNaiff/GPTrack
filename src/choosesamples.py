@@ -139,17 +139,21 @@ def _get_grads2(gp,hparams):
 
 def _get_hessian(gp,hparams,num_params):
     #TODO : Far to inefficient
-    hessian = [[None]*num_params]*num_params
+#    hessian = [[0.0]*num_params]*num_params
+    hessian = np.zeros((num_params,num_params))
     dl = torch.autograd.grad(gp.loglikelihood,hparams,
                              create_graph=True)
     for i,_ in enumerate(hparams):
         for j,pj in enumerate(hparams):
+#            print(dli],pj)
             d2lij = torch.autograd.grad(dl[i],pj,allow_unused=True,
                                         retain_graph = True)[0]
             if type(d2lij) == type(None):
                 hessian[i][j] = 0.0
             else:
                 hessian[i][j] = d2lij.item()
+    #Symmetrize just in case
+    hessian = 0.5*(hessian + hessian.transpose())
     return np.array(hessian)
 
 
