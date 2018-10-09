@@ -79,7 +79,7 @@ def choose_samples_laplace_a(data,kernel,noisekernel,
     """
     assert len(positives) == len(hparams)
     center_first = kwargs.get("center_first",True)
-    num_samples = kwargs.get("num_samples",True)
+    num_samples = kwargs.get("num_samples",20)
     default_prior_variance = kwargs.get("default_prior_variances",1.0)
     verbose = kwargs.get("verbose",0)
     num_params = len(hparams)
@@ -96,7 +96,7 @@ def choose_samples_laplace_a(data,kernel,noisekernel,
     #Extremely inneficient to make ANOTHER gp here
     #Adjust hparams so we can get second derivatives
     gp,hparams_new,hparams_scalar = _set_gp_with_grad(kernel,noisekernel,
-                                                      hparams,positives)
+                                                      data,hparams,positives)
     #Get second derivatives
     if verbose >= 1:
         print("Getting hessian")
@@ -113,9 +113,13 @@ def choose_samples_laplace_a(data,kernel,noisekernel,
             prior_variances.append(sigma2)
     if verbose >= 2:
         print(prior_variances)
+    #Final sampling
     hparamssamples = np.random.multivariate_normal(mean=np.zeros(num_params),
                                                    cov=hessian,
                                                    size=num_samples)
+    posindex = [i for i in range(len(positives)) if positives[i]]
+    hparamssamples[:,posindex] = np.exp(hparamssamples[:,posindex])
+    hparamssamples = list(hparamssamples)
     return hparamssamples,prior_variances
 
 

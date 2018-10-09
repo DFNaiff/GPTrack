@@ -135,9 +135,7 @@ class GPMarginSquare(object):
             # Supply ith gaussian process with the mean function meanfunc 
             # and covariance function cov func
             self.gplist[i] = gpobject.GPObject(self.kernel,self.noisekernel,
-                                               phisample)
-            if data:
-                self.gplist[i].change_data(data)
+                                               phisample,data)
 #==============================================================================
 # AUXILIARY FUNCTIONS
 #==============================================================================
@@ -205,50 +203,54 @@ def _combine_predictions_batch(weights_term,
                                      m_list,C_list):
     n = len(loglikelihoods)
     d = len(m_list[0])
+    print(loglikelihoods)
     loglikelihoods = loglikelihoods - np.max(loglikelihoods) #To avoid overflow
     likelihoods = np.exp(loglikelihoods).reshape(-1,1)
     m_array = np.transpose(np.hstack(m_list))
     C_array = np.transpose(np.dstack(C_list),(2,0,1))
-    D_array = np.linalg.det(C_array).reshape(-1,1)
+    lD_array = np.linalg.slogdet(C_array)[1].reshape(-1,1)
     I_array = np.linalg.inv(C_array)
     #Tile and repeat trick
+    print(C_array)
+    print(lD_array)
     M1 = np.repeat(m_array,n,axis=0)
     M2 = np.tile(m_array,[n,1])
     C1 = np.repeat(C_array,n,axis=0)
     C2 = np.tile(C_array,[n,1,1])
     L1 = np.repeat(likelihoods,n,axis=0)
     L2 = np.tile(likelihoods,[n,1])
-    D1 = np.repeat(D_array,n,axis=0)
-    D2 = np.tile(D_array,[n,1])
+    lD1 = np.repeat(lD_array,n,axis=0)
+    lD2 = np.tile(lD_array,[n,1])
     I1 = np.repeat(I_array,n,axis=0)
     I2 = np.tile(I_array,[n,1,1])
-    #Make C
+    #Make weights
     #TODO : Make it by cholesky factorization
     #TODO : Bad naming
     invsumcov = np.linalg.inv(C1 + C2)
-    diffM = (M1 - M2).reshape(n,d,1)
+    diffM = (M1 - M2).reshape(n**2,d,1)
     expoent = -0.25*np.matmul(diffM.transpose(0,2,1),
                               np.matmul(invsumcov,diffM)).reshape(-1,1)
-    detsumcov = np.linalg.det(C1 + C2).reshape(-1,1)
-    C = 1.0/detsumcov*np.exp(expoent)
+    ldetsumcov = np.linalg.slogdet(C1 + C2)[1].reshape(-1,1)
+    Cexp = np.exp(expoent)
     weights_vectorized = weights_term.reshape(-1,1)
-    w = weights_vectorized*(D1*D2)**(0.25)*np.sqrt(L1*L2)*C
+    detterm = np.exp(0.25*(lD1 + lD2) - 0.5*(ldetsumcov))
+    w = weights_vectorized*detterm*np.sqrt(L1*L2)*Cexp
     w = w/np.sum(w)
     #Means
-    M1b,M2b = M1.reshape(n,d,1),M2.reshape(n,d,1)
+    M1b,M2b = M1.reshape(n**2,d,1),M2.reshape(n**2,d,1)
     invsumcov2 = np.linalg.inv(I1 + I2)
     M = np.matmul(invsumcov2,np.matmul(C1,M1b) + \
-                  np.matmul(C2,M2b)).reshape(n,d)
+                  np.matmul(C2,M2b)).reshape(n**2,d)
     mean = np.sum(w*M,axis=0).reshape(-1,1)
     #Covariances
-    covterm = 2*invsumcov2*np.matmul(M.reshape(n,d,1),M.reshape(d,n,1))
-    cov = np.sum(w*covterm,axis=1) - np.outer(mean,mean)
+    covterm = 2*invsumcov2*np.matmul(M.reshape(n**2,d,1),
+                                     M.reshape(n**2,1,d))
+    wbroadcasted = np.tile(w[np.newaxis].transpose(1,0,2),[1,d,d])
+    cov = np.sum(wbroadcasted*covterm,axis=0) - np.outer(mean,mean)
     return mean,cov
 
 def _get_prior_means(phisamples,positives):
     phigrid = list(np.array(phisamples).transpose())
-    print(phigrid)
-    print(positives)
     assert len(positives) == len(phigrid)
     prior_means = np.zeros(len(phigrid))
     for i,phisample in enumerate(phigrid):
