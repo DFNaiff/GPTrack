@@ -272,6 +272,39 @@ class SphericalCorr(Kernel):
     def f(self,x,y):
         return self.W[x.long(),y.long()] 
 
+class CholeskyCorr(Kernel):
+    """
+        Cholesky correlation kernel, with nout outputs.
+    """
+    def __init__(self,nout):
+        raise NotImplementedError
+        self.dim = 1
+        self.nout = nout
+        self.nhyper = nout*(nout+1)//2
+        self.hyperparams = None
+        self.W = None
+        self.initialized = False
+
+    def initialize(self,hyperparams):
+        assert len(hyperparams) == self.nhyper
+        self.hyperparams = hyperparams
+        S = torch.zeros((self.nout,self.nout))
+        for i in range(0,self.nout):
+            start_ind = utils.triangular(i)
+            end_ind = utils.triangular(i+1)
+            S[:i+1,i] = torch.tensor(hyperparams[start_ind:end_ind])
+        W = torch.matmul(S.transpose(1,0),S) # S.T*S
+        self.W = W
+        self.initialized = True
+    
+    def reset(self):
+        self.hyperparams = None
+        self.W = None
+        self.initialized = False
+
+    def f(self,x,y):
+        return self.W[x.long(),y.long()]
+
 
 #==============================================================================
 # Noise kernels
