@@ -8,8 +8,11 @@ import torch
 from . import utils
 from . import utilstorch
 
+
+SQRT2 = float(np.sqrt(2))
 SQRT3 = float(np.sqrt(3))
 SQRT5 = float(np.sqrt(5))
+PI = float(np.pi)
 
 
 class Kernel(object):
@@ -145,6 +148,82 @@ class IsoMatern52(IsoRadKernel):
 #==============================================================================
 # Periodic kernels
 #==============================================================================
+class PerKernel(Kernel):
+    def __init__(self):
+        self.dim = 1
+        self.nhyper = 2
+        self.hyperparams = None
+        self.initialized = False
+        
+    def initialize(self,hyperparams):
+        assert len(hyperparams) == self.nhyper
+        self.hyperparams = hyperparams
+        self.initialized = True
+    
+    def reset(self):
+        self.hyperparams = None
+        self.initialized = False
+
+
+class PerRBF(PerKernel):
+    """
+        Periodic RBF kernel. Number of hyperparams : 1
+        {0:'T',1:'l'}
+    """
+    def __init__(self):
+        super(PerRBF,self).__init__()
+        
+    def f(self,x,y):
+        r2 = 4*torch.sin(PI*(x - y)/self.hyperparams[0])**2 / \
+                   self.hyperparams[1]**2
+#        print(r2)
+        return torch.exp(-0.5*r2)
+
+
+class PerMatern12(PerKernel):
+    """
+        Periodic Matern12 kernel. Number of hyperparams : 2
+        {0:'T',1:'l'}
+    """
+    def __init__(self):
+        super(PerMatern12,self).__init__()
+        
+    def f(self,x,y):
+        #r2 = (cos(2*pi*x/T) - cos(2*pi*y/T))**2 + \
+        #     (sin(2*pi*x/T) - sin(2*pi*y/T))**2
+        r = 2*torch.abs(torch.sin(PI*(x - y)/self.hyperparams[0])) / \
+                  self.hyperparams[1]
+        return torch.exp(-r)
+
+
+class PerMatern32(PerKernel):
+    """
+        Periodic Matern32 kernel. Number of hyperparams : 2
+        {0:'T',1:'l'}
+    """
+    def __init__(self):
+        super(PerMatern32,self).__init__()
+        
+    def f(self,x,y):
+        r = 2*torch.abs(torch.sin(PI*(x - y)/self.hyperparams[0])) / \
+                  self.hyperparams[1]
+        return (1 + SQRT3*r)*torch.exp(-SQRT3*r)
+
+
+class PerMatern52(PerKernel):
+    """
+        Periodic Matern52 kernel. Number of hyperparams : 2
+        {0:'T',1:'l'}
+    """
+    def __init__(self,dim):
+        super(PerMatern52,self).__init__()
+    
+    def f(self,x,y):
+        r = 2*torch.abs(torch.sin(PI*(x - y)/self.hyperparams[0])) / \
+                  self.hyperparams[1]
+        return (1 + SQRT5*r + 5.0/3*r**2)*torch.exp(-SQRT5*r)
+
+
 #==============================================================================
 # Multiple output kernels
 #==============================================================================
@@ -177,7 +256,6 @@ class SphericalCorr(Kernel):
         for i in range(1,self.nout):
             start_ind = utils.triangular(i-1)
             end_ind = utils.triangular(i)
-#            th_now,th_temp = th_temp[:i],th_temp[i:]
             s = utilstorch.hypersphere_param(i+1,
                                              thetas[start_ind:end_ind])
             S[:i+1,i] = s
@@ -352,3 +430,45 @@ class TensorProd(CompoundKernel):
     def f(self,x,y):
         return self.k1.f(x[:,:self.nm],y[:,:self.nm]) * \
                self.k2.f(x[:,self.nm:],y[:,self.nm:])
+
+#==============================================================================
+# Special kernels
+#==============================================================================
+class ShiftedMO(Kernel):
+    """
+        Variation of a compound kernel made specifically 
+        for shifted multiple outputs time series.
+        Initializes with [k1.hyperparameters]
+    """
+    def __init__(self,k,nout,dim):
+        self.k1 = SphericalCorr(nout)
+        self.k2 = k
+        self.dim = self.k1.dim + self.k2.dim
+        self.nm = self.k1.dim
+        self.nout = nout
+
+    def initialize(self,hyperparams):
+        assert len(hyperparams) == self.k1.nhyper + self.k2.nhyper + \
+                                   self.nout - 1
+        hyper1 = hyperparams[:self.k1.nhyper]
+        hyper2 = hyperparams[self.k1.nhyper:self.k1.nhyper + self.k2.nhyper]
+        hyper3 = hyperparams[self.k1.nhyper + self.k2.nhyper:]
+        hyper3 = [torch.tensor(0.0)] + hyper3
+        self._shiftparams = torch.cat([torch.unsqueeze(hp,0) 
+                                       for hp in hyper3]).reshape(-1,1)
+        self.k1.initialize(hyper1)
+        self.k2.initialize(hyper2)
+        self.hyperparams = hyperparams
+        self.initialized = True
+    
+    def reset(self):
+        self.k1.reset()
+        self.k2.reset()
+        self.hyperparams = None
+        self.initialized = False
+
+    def f(self,x,y):
+        tx = self._shiftparams[x[:,0].long()]*torch.ones((x.size()[0],1))
+        ty = self._shiftparams[y[:,0].long()]*torch.ones((y.size()[0],1))
+        return self.k1.f(x[:,:self.nm],y[:,:self.nm]) * \
+               self.k2.f(x[:,self.nm:] - tx,y[:,self.nm:] - ty)

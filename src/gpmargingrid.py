@@ -181,7 +181,7 @@ def _calculate_weights_term_nongrid(phisamples,prior_variances,gp_length_scales,
         gp_length_scales : a (positive) scalar (LATER: also arrays)
         positives : [bool]*n list of parameters that are positive
         prior_means : a scalar or n-sized array
-        returns a m_1*...*m_n sized square matrix
+        returns a eta sized square matrix
     """
     eta = len(phisamples)
     n = len(phisamples[0])
@@ -197,6 +197,7 @@ def _calculate_weights_term_nongrid(phisamples,prior_variances,gp_length_scales,
         prior_variances = prior_variances*np.ones(n)
     if type(prior_means) != np.ndarray: # A scalar was supplied
         prior_means = prior_means*np.ones(n)
+    phisamplestr = np.array(phisamplestr)
     # Multivariate normal used for W
     # TODO: change for more efficient manner
     l2 = gp_length_scales**2
@@ -204,11 +205,11 @@ def _calculate_weights_term_nongrid(phisamples,prior_variances,gp_length_scales,
                        [np.diag(prior_variances),np.diag(prior_variances + l2)]])
     mvn = spstats.multivariate_normal(mean = np.hstack([prior_means]*2),
                                       cov=C)
-    wfunc = lambda phi_i,phi_j : mvn.pdf(np.hstack([phi_i,phi_j]))
+    wfunc = lambda phi_i,phi_j : mvn.pdf(np.hstack([phi_i,phi_j])).reshape(-1,1)
     kfunc = functools.partial(utils.sqexp,l=gp_length_scales)
-    K = utils.binary_function_matrix(kfunc,phisamplestr)
+    K = utils.binary_function_matrix_vec(kfunc,phisamplestr)
     U = utilsla.spla.cholesky(K,lower=False)
-    W = utils.binary_function_matrix(wfunc,phisamplestr)
+    W = utils.binary_function_matrix_vec(wfunc,phisamplestr)
     return W,U
 
 

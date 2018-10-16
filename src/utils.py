@@ -15,6 +15,20 @@ def binary_function_matrix(f,L):
     return M
 
 
+def binary_function_matrix_vec(f,x):
+    """
+        f : two argument function
+        x : an n x m array        
+        returns : n x n array M, where M[i,j] = f(l_i,l_j) 
+    """
+    n = x.shape[0]
+    X1 = np.repeat(x.numpy(),n,axis=0)
+    X2 = np.tile(x.numpy(),[n,1])
+    K = f(X1,X2)
+    K = K.reshape(n,n)
+    return K
+
+
 def binary_function_matrix_2(f,L1,L2):
     """
         f : two argument function
@@ -160,7 +174,8 @@ def roundodd(x):
     
     
 def sqexp(x,y,l,theta=1.0):
-    return theta*np.exp(-0.5*np.sum((np.square(x-y)/(l**2))))
+    return theta*np.exp(-0.5*np.sum((np.square(x-y)/(l**2)),
+                                    axis=1,keepdims=True))
 
 
 def triangular(i):

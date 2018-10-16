@@ -13,7 +13,8 @@ from . import utilstorch
 
 #TODO : You may be holding K on memory without needing
 class GPObject(object):
-    def __init__(self,kernel,noise_kernel,hparams,data = None):
+    def __init__(self,kernel,noise_kernel,hparams,data,
+                      **kwargs):
         """
             kernel : kernel of the GP
             noise_kernel : kernel of the GP noise
@@ -22,7 +23,9 @@ class GPObject(object):
             data : (xdata,ydata) tuple, where xdata is a 
                     (nsamples,nfeatures)-array and 
                     ydata is a (nsamples,1)-array
+            gpmean : default mean of the GP
         """
+        self.gpmean = kwargs.get("gpmean",0.0)
         self._initialize_kernels(kernel,noise_kernel,hparams)
         self.change_data(data)
 
@@ -35,7 +38,7 @@ class GPObject(object):
         x = self._convert_input_single(x)
         kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
         s = torch.trtrs(kx,self.U,transpose=True)[0]
-        mean = torch.matmul(s.transpose(1,0),self.z)
+        mean = torch.matmul(s.transpose(1,0),self.z) + self.gpmean
         if not getvar:
             if return_as_numpy: return mean.numpy()[0][0]
             else: return mean[0][0]
@@ -55,7 +58,7 @@ class GPObject(object):
         kx = utilstorch.binary_function_matrix_ret(self.kernel.f,
                                                    self.xdata,x)
         s = torch.trtrs(kx,self.U,transpose=True)[0]
-        mean = torch.matmul(s.transpose(1,0),self.z)
+        mean = torch.matmul(s.transpose(1,0),self.z) + self.gpmean
         if not getvar:
             if return_as_numpy: return mean.numpy()
             else: return mean
@@ -273,7 +276,7 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     bounds = kwargs.get("bounds")
     verbose = kwargs.get("verbose")
     max_iter = kwargs.get("max_iter",100)
-    line_search_fn = kwargs.get("line_search_fn","backtracking")
+    line_search_fn = kwargs.get("line_search_fn","goldstein")
     xdata,ydata = data
     for i,_ in enumerate(hparams): #Convert to tensor
         hparams[i] = torch.tensor(hparams[i])
