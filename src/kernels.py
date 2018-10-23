@@ -474,6 +474,7 @@ class ShiftedMO(Kernel):
         Initializes with [k1.hyperparameters]
     """
     def __init__(self,k,nout,dim):
+        raise NotImplementedError
         self.k1 = SphericalCorr(nout)
         self.k2 = k
         self.dim = self.k1.dim + self.k2.dim

@@ -46,7 +46,6 @@ def set_data(T,Ylist,Z,p=0.5,nprevious=10):
     Xtrain = np.hstack([prep1a,prep2a])
     Xdata = np.hstack([np.vstack([prep1a,prep1b]),
                        np.vstack([prep2a,prep2b])])
-    print(Xdata)
     prepya = [ytrain.reshape(-1,1) for ytrain in ytrains] + \
              [ztrain.reshape(-1,1)]
     prepyb = [Y[nprevious:].reshape(-1,1) for Y in Ylist]
@@ -71,13 +70,17 @@ positives = [True,True,True,
              True,True,True]
 bounds = [(1e-4,1e4)]*3+[(-np.pi,np.pi)]*3 + [(1e-4,1e4)] + \
          [(1e-8,1e3)]*3
+frozen = [False,False,False,
+          False,False,False,False,
+          True,True,True]
 #Kernel testing
 #xkern,ykern = torch.tensor(xtrain)
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xtrain,Ytrain))
-
+print(gp.showhparams())
 start_time = time.clock()
 gp = gp.optimize(option="B",verbose=0,num_starts = 1,
-                 bounds=bounds,line_search_fn = "goldstein")
+                 bounds=bounds,line_search_fn = "goldstein",
+                 frozen = frozen)
 end_time = time.clock()
 print(end_time - start_time)
 hparams = gp.showhparams()

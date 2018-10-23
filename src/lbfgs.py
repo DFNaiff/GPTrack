@@ -219,6 +219,7 @@ class LBFGS(Optimizer):
             else:
                 # no line search, simply move with fixed-step
                 self._add_grad(t, d)
+            print("CLOSURE:",closure().item())
 #            print([p.item() for p in self._params])
 #            print("new value checking")
             if n_iter != max_iter:
@@ -262,7 +263,7 @@ class LBFGS(Optimizer):
         state['prev_flat_grad'] = prev_flat_grad
         state['prev_loss'] = prev_loss
 
-        return orig_loss
+        return loss
 
     def _copy_param(self):
         original_param_data_list = []

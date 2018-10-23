@@ -215,7 +215,7 @@ class GPObject(object):
 #TODO : Due to circular dependences, this isn't in another .py file.
 #       But there should be a workaround
 def _optimize(kernel,noisekernel,hparams,
-             data,option,**kwargs):
+              data,option,**kwargs):
     """
         Choose new parameters for the GP based on 
         MLE estimation.
@@ -231,6 +231,7 @@ def _optimize(kernel,noisekernel,hparams,
                       optimization. Default : "sqrt"
             bounds : [(lb,ub),] list of lower and upper bounds. 
                      Used for bounded optimization
+            frozen : [bool] list of parameters to not optimize. Default: False
             num_starts : Number of times to run L-BFGS. 
                          Only available for bounded optimization.
             verbose : level of verbosity. Default : 1
@@ -277,7 +278,11 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     verbose = kwargs.get("verbose")
     max_iter = kwargs.get("max_iter",100)
     line_search_fn = kwargs.get("line_search_fn","goldstein")
+    frozen = kwargs.get("frozen",False)
+    if frozen == False:
+        frozen = [False]*len(hparams)
     xdata,ydata = data
+    assert len(frozen) == len(hparams)
     for i,_ in enumerate(hparams): #Convert to tensor
         hparams[i] = torch.tensor(hparams[i])
     for i,_ in enumerate(bounds):
@@ -307,8 +312,13 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
         hparam_new = hparam.clone()
         hparam_new.requires_grad_()
         hparams_new.append(hparam_new)
+    #Set the hparams to optimize (only those not frozen)
+    notfrozen = utils.list_not(frozen)
+    hparams_to_opt = utils.bool_slice(hparams_new,notfrozen)
+    bounds_not_frozen = utils.bool_slice(bounds,notfrozen)
     #Optmizer
-    optimizer = lbfgs.LBFGS(hparams_new,max_iter=max_iter,bounds=bounds,
+    optimizer = lbfgs.LBFGS(hparams_to_opt,max_iter=max_iter,
+                            bounds=bounds_not_frozen,
                             line_search_fn = line_search_fn)
     optimizer.zero_grad()
     def closure():
@@ -316,11 +326,11 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
         nll = _negative_log_likelihood(hparams_new)
         nll.backward(retain_graph=True)
         return nll
-    nll = optimizer.step(closure)
+    loss = optimizer.step(closure)
     #Create new gp
     for i,_ in enumerate(hparams_new):
         hparams_new[i].requires_grad = False
-    return nll.item(),hparams_new
+    return loss,hparams_new
     
 def _optimize_single_start_u(kernel,noisekernel,hparams,
                            data,**kwargs):

@@ -40,6 +40,15 @@ def binary_function_matrix_2(f,L1,L2):
     return M
 
 
+def bool_slice(L,b):
+    """
+        L : list
+        b : list of booleans (same size as L)
+        returns : the same as L[b] if L was an array
+    """
+    return [L[i] for i in range(len(b)) if b[i]]
+
+
 def complete_with_zeros(x,n):
     """
         Complete 1d array with size m <= n with zeros,
@@ -128,6 +137,10 @@ def hypersphere_param_derivative2(n,thetas,j):
         if k + 1 == n: # Case (d)
             dw0[k] = -np.prod(np.sin(thetas))
     return dw0
+
+
+def list_not(b):
+    return [not bb for bb in b]
 
 
 def nth_index(iterable, value, n):
