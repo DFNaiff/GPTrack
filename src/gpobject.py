@@ -3,340 +3,344 @@ import copy
 import functools
 
 import numpy as np
-import scipy.optimize as spopt
+import torch
 
+from . import lbfgs
 from . import utils
 from . import utilsla
+from . import utilstorch
 
 
+#TODO : You may be holding K on memory without needing
 class GPObject(object):
-    def __init__(self,kernel,noise_kernel,phi,data = None):
-        self._initialize_kernels(kernel,noise_kernel,phi)
-        if data != None:
-            self.change_data(data)
-        else:
-            self._initialize_empty()
-    
-    def predict(self,x):
+    def __init__(self,kernel,noise_kernel,hparams,data,
+                      **kwargs):
+        """
+            kernel : kernel of the GP
+            noise_kernel : kernel of the GP noise
+            hparams : list of hyperparameters (size: kernel.nparams +
+                      noise_kernels.nparams)
+            data : (xdata,ydata) tuple, where xdata is a 
+                    (nsamples,nfeatures)-array and 
+                    ydata is a (nsamples,1)-array
+            gpmean : default mean of the GP
+        """
+        self.gpmean = kwargs.get("gpmean",0.0)
+        self._initialize_kernels(kernel,noise_kernel,hparams)
+        self.change_data(data)
+
+    def predict(self,x,getvar = True,return_as_numpy = True):
         """
             Calculate mean(x),var(x)
         """
         # TODO : add efficient update of r
-        kx = utils.relation_array(self.cov,x,self.xdata)
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        s = utilsla.invumatmul(self.U,kx,trans='T')
-        mean = self.m + np.dot(r,s)
-        var = self.cov(x,x) - np.dot(s,s)
-        return mean,var
+        # TODO : GIANT workaround here
+        x = self._convert_input_single(x)
+        kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
+        s = torch.trtrs(kx,self.U,transpose=True)[0]
+        mean = torch.matmul(s.transpose(1,0),self.z) + self.gpmean
+        if not getvar:
+            if return_as_numpy: return mean.numpy()[0][0]
+            else: return mean[0][0]
+        else:
+            x = x.unsqueeze(0) # TODO : GIANT workaround here
+            var = self.kernel.f(x,x) - torch.matmul(s.transpose(1,0),s)
+            if return_as_numpy: return mean.numpy()[0][0],var.numpy()[0][0]
+            else: return mean[0][0],var[0][0]
     
-    def predict_batch(self,xs):
-        Kx = utils.binary_function_matrix_2(self.cov,xs,self.xdata)
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        S = utilsla.invumatmul(self.U,Kx.transpose(),trans='T')
-        mean = self.m + np.dot(S.transpose(),r)
-        Kxx = utils.binary_function_matrix(self.cov,xs)
-        var = Kxx - np.dot(S.transpose(),S)
-        return mean,var
+    def predict_batch(self,x,getvar = True,return_as_numpy = True,
+                       retdiag = True):
+        """
+            Calculate mean(x),var(x)
+        """
+        # TODO : add efficient update of r
+        x = self._convert_input_batch(x)
+        kx = utilstorch.binary_function_matrix_ret(self.kernel.f,
+                                                   self.xdata,x)
+        s = torch.trtrs(kx,self.U,transpose=True)[0]
+        mean = torch.matmul(s.transpose(1,0),self.z) + self.gpmean
+        if not getvar:
+            if return_as_numpy: return mean.numpy()
+            else: return mean
+        else:
+            var = utilstorch.binary_function_matrix(self.kernel.f,x) - \
+                  torch.matmul(s.transpose(1,0),s)
+            if retdiag:
+                var = torch.diag(var).reshape(-1,1)
+            if return_as_numpy: return mean.numpy(),var.numpy()
+            else: return mean,var
     
     def change_data(self,data):
         """
             Changes the data of the GP, replacing it with new_data
         """
         # TODO : assertions
-        x,z = data
-        self.xdata = copy.copy(x)
-        self.zdata = np.array(z)
-        self.numdata = len(x)
-        self.K = utils.binary_function_matrix(self.cov,self.xdata)
+        x,y = data
+        self.xdata = torch.tensor(x).float()
+        self.ydata = torch.tensor(y).float()
+        self.numdata = self.xdata.shape[0]
+        self.dimdata = self.xdata.shape[1]
+        self.K = utilstorch.binary_function_matrix(self.kernel.f,
+                                                   self.xdata)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
-            I = np.diag([self.noisecov(xx,xx) for xx in self.xdata])
-            self.K = self.K + I
+            Idiag = self.noisekernel.fdiag(self.xdata)
+            I = torch.diag(Idiag)
         else:
-            raise NotImplementedError
-        self.U = utilsla.spla.cholesky(self.K,lower=False)
+            I = self.noisekernel.fdiag(self.xdata)
+        self.K = self.K + I
+        self.U = torch.potrf(self.K)
         self._update_likelihood()
         self.is_empty = False
         
     def downdate(self,i=0):
-        # TODO : do not simply downdate likelihood
-        self.K = utilsla.contract(self.K,i)
-        self.U = utilsla.contract_cholesky(self.U,i)
-        self.xdata = self.xdata[:i] + self.xdata[i+1:]
+        # TODO : Find a way to not pass through numpy
+        self.K = torch.tensor(utilsla.contract(self.K.numpy(),i)).float()
+        self.U = torch.tensor(utilsla.contract_cholesky(
+                              self.U.numpy().astype(np.float),i)).float()
         # TODO : surely there's a function for dropping
-        self.zdata = np.concatenate([self.zdata[:i],
-                                     self.zdata[i+1:]])
+        self.xdata = torch.cat([self.xdata[:i,:],self.xdata[i+1:,:]])
+        self.ydata = torch.cat([self.ydata[:i],self.ydata[i+1:]])
+        self.numdata = self.numdata - 1
         self._update_likelihood()
     
-    def downdate_batch(self,drop_inds,is_sorted = True):
+    def downdate_batch(self,drop_inds,is_sorted = False):
+        """
+            drop_inds = list of indexes to be dropped
+        """
         # TODO : not clear whether there is a simple and more efficient way
         #        to downdate. But think of one
-        # Assumes drop_inds to be sorted
         if not is_sorted:
             drop_inds = sorted(drop_inds)
         for ind in drop_inds[::-1]:
             self.downdate(ind)
-            
-    def update(self,new_data):
-        """
-            Updates data, covariance matrix and it's cholesky factor, 
-            and likelihood
-        """
-        x_t,z_t = new_data
-        if self.is_empty: # Adding first data
-            self._add_first_data(x_t,z_t)
-        else: # Updating the data
-            self._add_new_data(x_t,z_t)  
-    
+
     def update_batch(self,new_data_batch):
         """
-            x_t = [x_t1,x_t2,...,x_tn] list of inputs
-            z_t = [x_t1,x_t2,...,x_tn] list of outputs
+            new_data_batch : (xdata,ydata) tuple, where xdata is a 
+                             (nsamples,nfeatures)-array and 
+                             ydata is a (nsamples,1)-array
         """
         #TODO : Assertions
-        if self.is_empty:
-            self.change_data(new_data_batch)
+        x_new,y_new = new_data_batch
+        x_new = torch.tensor(x_new).float()
+        y_new = torch.tensor(y_new).float()
+        num_new = x_new.shape[0]
+        self.numdata = self.numdata + num_new
+        V = utilstorch.binary_function_matrix_ret(self.kernel.f,self.xdata,x_new)
+        C = utilstorch.binary_function_matrix(self.kernel.f,x_new)
+        if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
+            Idiag = self.noisekernel.fdiag(x_new)
+            I = torch.diag(Idiag)
         else:
-            x_t,z_t = new_data_batch
-            num_new = len(x_t)
-            self.numdata = self.numdata + num_new
-            V = np.vstack([utils.relation_array(self.cov,x_ti,self.xdata) 
-                           for x_ti in x_t]).transpose() #K(Xnew,Xold)
-            C = utils.binary_function_matrix(self.cov,x_t) #K(Xnew,Xnew)
-            if self.noisekernel.is_diagonal: #K(Xnew,Xnew) + sigma^2*I
-                I = np.diag([self.noisecov(xx,xx) for xx in x_t])
-                C = C + I
-            else:
-                raise NotImplementedError
-            self.K = utilsla.expand_symmetric_with_matrix(self.K,V,C) #K
-            self.U = utilsla.expand_cholesky_with_matrix(self.U,V,C) #cholesky factor
-            self.xdata += x_t
-            self.zdata = np.hstack([self.zdata,np.array(z_t)])
-            self._update_likelihood()
+            I = self.noisekernel.fdiag(x_new)
+        C = C + I
+
+        self.K = torch.tensor(utilsla.expand_symmetric_with_matrix(self.K.numpy(),
+                                                                   V.numpy(),
+                                                                   C.numpy())).float() #K
+        self.U = torch.tensor(utilsla.expand_cholesky_with_matrix(self.U.numpy(),
+                                                                   V.numpy(),
+                                                                   C.numpy())).float() #K
+        self.xdata = torch.cat([self.xdata,x_new])
+        self.ydata = torch.cat([self.ydata,y_new])
+        self._update_likelihood()
     
-    def optimize(self,adjustables,positives,trans = None,
-                      verbose=0,rethypers = False,
-                      tol=1e-4,method = "L-BFGS-B"):
+    def optimize(self,option="B",**kwargs):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
             input:
-                adjustables : [bool] list of parameters to change
-                positives : [bool] list of positive parameters
-                trans : list of transformation to 
-                        be applied on ith parameters on optimization. 
-                        options: None,"log","sqrt"
-                        default: [None]
-                rethypers: whether to return hyperparameters
-                tol : solver tolerance.
-                method : "L-BFGS-B","TNC" or "SLSQP"
+                option : "B","U", "B" stand for bounded, "U" for unbounded
+                positives : [bool] list of positive parameters.
+                            Required for unbounded optimization
+                warpings: None,"sqrt","log". Only used for unbounded 
+                          optimization. Default : "sqrt"
+                bounds : [(lb,ub),] list of lower and upper bounds. 
+                         Used for bounded optimization
+                num_starts : Number of times to run L-BFGS. 
+                             Only available for bounded optimization.
+                verbose : level of verbosity. Default : 1
             returns:
-                GPObject with new parameters. If rethyper also hyperparameters
+                GPObject with new parameters.
         """
-        #TODO : For now not adjusting mean.
-        #FIXME : This is turning quickly into spaghetti code
-        #TODO : GET choose_samples functions and use here also
-        if trans == None:
-            trans = [None]*len(positives)
-        def f_and_df(phi):
-            if verbose >= 2: print(phi)
-            # Returns both log likelihood and gradient 
-            # of the gp with adjustables parameters changed
-            phicopy = self.phi.copy()
-            phicopy[adjustables] = phi
-            for i,_ in enumerate(phicopy): #transformations
-                if trans[i] == "log":
-                    phicopy[i] = np.exp(phicopy[i])
-                if trans[i] == "sqrt":
-                    phicopy[i] = np.square(phicopy[i])
-            gpcopy = GPObject(self.kernel,self.noisekernel,
-                              phicopy,[self.xdata,self.zdata])
-            f = -gpcopy.loglikelihood
-            inds = [i for i in range(len(adjustables)) if adjustables[i]]
-            df = -gpcopy._dbatch_loglikelihood(inds)
-            for i,_ in enumerate(df): #transformations
-                if trans[i] == "log":
-                    df[i] = phicopy[i]*df[i]
-                if trans[i] == "sqrt":
-                    df[i] = 2*phicopy[i]*df[i] #TODO : Is this the correct way?
-            return f,df
-        newphiontrans = self.phi.copy()
-        for i,_ in enumerate(newphiontrans): #transformations
-            if trans[i] == "log":
-                newphiontrans[i] = np.log(newphiontrans[i])
-            if trans[i] == "sqrt":
-                newphiontrans[i] = np.sqrt(newphiontrans[i])
-        phiinit = newphiontrans[adjustables]
-        #Setting bounds
-        lb = []
-        ub = []
-        for i,adjustable in enumerate(adjustables):
-            if adjustable:
-                if trans[i] == "log":
-                    lb.append(-25);ub.append(10)
-                elif trans[i] == "sqrt":
-                    lb.append(-np.inf);ub.append(np.inf)
-                elif positives[i]:
-                    lb.append(1e-20);ub.append(np.inf)
-                else:
-                    lb.append(-np.inf);ub.append(np.inf)
-                ub.append(np.inf)
-        bounds = spopt.Bounds(lb,ub)
-        #Optimization
-        opt = spopt.minimize(f_and_df,x0 = phiinit,jac = True,bounds=bounds,
-                             tol = tol)
-        if verbose >= 1 : print(opt)
-        phiopt = opt.x
-        newphi = self.phi.copy()
-        newphi[adjustables] = phiopt
-        for i,_ in enumerate(newphi): #transformations
-            if trans[i] == "log":
-                newphi[i] = np.exp(newphi[i])
-            if trans[i] == "sqrt":
-                newphi[i] = np.square(newphi[i])
-        print(newphi)
-        newgp = GPObject(self.kernel,self.noisekernel,
-                            newphi,[self.xdata,self.zdata])
-        if not rethypers:
-            return newgp
-        else:
-            return newgp,newphi
-    
-    def _add_first_data(self,x_t,z_t):
-        self.xdata = [x_t]
-        self.zdata = np.array([z_t])
-        self.numdata = 1
-        self.K = np.array([[self.cov(x_t,x_t)]]) #K(X,X)
-        self.K = self.K + self.noise_cov(x_t,x_t) #K(X,X) + sigma^2*I
-        self.U = np.sqrt(self.K) #cholesky factor
-        self.loglikelihood = -0.5*((z_t**2)/self.K[0,0] + \
-                                   np.log(self.K[0,0]) + \
-                                   self.numdata*np.log(2*np.pi))
-        self.likelihood = np.exp(self.loglikelihood)
-        self.is_empty = False
-    
-    def _add_new_data(self,x_t,z_t):
-        self.numdata = self.numdata + 1
-        v = utils.relation_array(self.cov,x_t,self.xdata) #k(xnew,Xold)
-        c = self.cov(x_t,x_t) #k(xnew,xnew)
-        c = c + self.noisecov(x_t,x_t) #k(xnew,xnew) + sigma^2
-        self.K = utilsla.expand_symmetric(self.K,v,c) #K
-        self.U = utilsla.expand_cholesky(self.U,v,c) #cholesky factor
-        self.xdata.append(x_t)
-        self.zdata = np.append(self.zdata,z_t)
-        self._update_likelihood()
+        return _optimize(self.kernel,self.noisekernel,
+                         self.hparams,(self.xdata,self.ydata),
+                         option,**kwargs)
         
-    def _initialize_kernels(self,kernel,noisekernel,phi):
+    def _initialize_kernels(self,kernel,noisekernel,hparams):
+        self.hparams = [None]*len(hparams)
+        for i,_ in enumerate(hparams): #Convert to tensor
+            self.hparams[i] = torch.tensor(hparams[i])
         self.nhkern = kernel.nhyper #Number of kernel hyperparams
         self.nhnoise = noisekernel.nhyper #Number of noise kernel hyperparams
-        assert len(phi) == self.nhkern + self.nhnoise #Check correct nhyper
-        self.phi = phi #Hyperparams
-        kernelphi,noisephi = phi[:self.nhkern],phi[self.nhkern:]
+        assert len(hparams) == self.nhkern + self.nhnoise #Check correct nhyper
+        kernelparams = self.hparams[:self.nhkern]
+        noiseparams = self.hparams[self.nhkern:]
+        #Set kernels
         self.kernel = copy.deepcopy(kernel)
         self.noisekernel = copy.deepcopy(noisekernel)
         if hasattr(kernel,'initialized') and kernel.initialized:
             self.kernel.reset()
         if hasattr(noisekernel,'initialized') and noisekernel.initialized:
             self.noisekernel.reset()
-        self.kernel.initialize(kernelphi)
-        self.noisekernel.initialize(noisephi)
-        self.cov = self.kernel.f
-        self.noisecov = self.noisekernel.f
-        self.m = 0
-    
-    def _initialize_empty(self):
-        self.xdata = None
-        self.zdata = None
-        self.numdata = 0
-        self.K = None
-        self.U = None
-        self.likelihood = None
-        self.loglikelihood = None
-        self.is_empty = True
+        self.kernel.initialize(kernelparams)
+        self.noisekernel.initialize(noiseparams)
     
     def _update_likelihood(self):
         """
             Calculate likelihood
         """
-        # TODO : add efficient update of r
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        l1 = np.dot(r,r)
-        l2 = 2*np.sum(np.log(np.diag(self.U)))
-        l3 = self.numdata*np.log(2*np.pi)
-        self.loglikelihood = -0.5*(l1 + l2 + l3)
+        self.z = torch.trtrs(torch.tensor(self.ydata).float(),
+                             self.U,transpose=True)[0]
+        term1 = 0.5*torch.sum(self.z**2)
+        term2 = torch.sum(torch.log(torch.diag(self.U)))
+        term3 = 0.5*self.numdata*np.log(2*np.pi)
+        self.loglikelihood = -(term1 + term2 + term3)
+    
+    #Input conversion
+    def _convert_input_single(self,x):
+        return torch.tensor(x).float()
 
-    def _dbatch_loglikelihood(self,inds):
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        M = np.outer(alpha,alpha)
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        grads = []
-        for i in inds:
-            if i < self.nhkern: #Case kernel
-                df = functools.partial(self.kernel.df,i=i)
-            elif i >= self.nhkern: #Case noise kernel
-                df = functools.partial(self.noisekernel.df,i=i - self.nhkern)
-            dK = utils.binary_function_matrix(df,self.xdata)
-            g = 0.5*((M-invK)*(dK.transpose())).sum()
-            grads.append(g)
-        return np.array(grads)
+    def _convert_input_batch(self,x):
+        return torch.tensor(x).float()
     
-    def _d2batch_loglikelihood(self,inds):
-        # See Gaussian Process for Regression and optimization
-        # TODO : Better implementation
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        c = np.matmul(invK,self.zdata - self.m) #invK*y
-        grads2 = []
-        for i in inds:
-            if i < self.nhkern: #Case kernel
-                df = functools.partial(self.kernel.df,i=i)
-                d2f = functools.partial(self.kernel.d2f,i=i)
-            elif i >= self.nhkern: #Case noise kernel
-                df = functools.partial(self.noisekernel.df,i=i - self.nhkern)
-                d2f = functools.partial(self.noisekernel.d2f,
-                                       i=i - self.nhkern)
-            dK = utils.binary_function_matrix(df,self.xdata)
-            d2K = utils.binary_function_matrix(d2f,self.xdata)
-            M = np.matmul(np.matmul(dK,invK),dK) #dK*invK*dK
-            #First term. 1/2*tr(invK*(dK*invK*dK - d2K))
-            term1 = 0.5*((M - d2K)*(invK.transpose())).sum()
-            #Second term. 1/2*(c)'*(d2K - 2*dK*invK*dK)*c
-            term2 = 0.5*utilsla.bilinear_form(c,d2K - 2*M,c)
-            g2 = term1 + term2
-            grads2.append(g2)
-        return np.array(grads2)
-            
-    # Legacy functions
-    def _dmean_loglikelihood(self):
-        raise NotImplementedError # TODO : implement
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        g = np.sum(alpha)
-        return g
-    
-    def _dnoisekernel_loglikelihood(self,i):
-        #TODO : simplify
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        M = np.outer(alpha,alpha)
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        df = functools.partial(self.noisekernel.df,i=i)
-        dK = utils.binary_function_matrix(df,self.xdata)
-        #1/2*tr((alpha*alpha^T - K^(-1))*dK)
-        g = 0.5*((M-invK)*(dK.transpose())).sum()
-        return g
-    
-    def _dkernel_loglikelihood(self,i):
-        r = utilsla.invumatmul(self.U,self.zdata - self.m,trans='T')
-        alpha = utilsla.invumatmul(self.U,r,trans='N')
-        M = np.outer(alpha,alpha)
-        invK = utilsla.inverse_cholesky_upper(self.U)
-        df = functools.partial(self.kernel.df,i=i)
-        dK = utils.binary_function_matrix(df,self.xdata)
-        #1/2*tr((alpha*alpha^T - K^(-1))*dK)
-        g = 0.5*((M-invK)*(dK.transpose())).sum()
-        return g
-    
-    def _d2kernel_loglikelihood(self,i):
-        raise NotImplementedError
+    #Print functions
+    def showhparams(self):
+        return [hp.item() for hp in self.hparams]
 
-        
+
+#==============================================================================
+# Optimizer for GP
+#==============================================================================
+#TODO : Due to circular dependences, this isn't in another .py file.
+#       But there should be a workaround
+def _optimize(kernel,noisekernel,hparams,
+              data,option,**kwargs):
+    """
+        Choose new parameters for the GP based on 
+        MLE estimation.
+        input:
+            kernel : kernel of the GP
+            noisekernel : kernel of the GP noise
+            hparams : list of positive hyperparameters
+            data : (xdata,ydata) tuple
+            option : "B","U", "B" stand for bounded, "U" for unbounded
+            positives : [bool] list of positive parameters.
+                        Required for unbounded optimization
+            warpings: None,"sqrt","log". Only used for unbounded 
+                      optimization. Default : "sqrt"
+            bounds : [(lb,ub),] list of lower and upper bounds. 
+                     Used for bounded optimization
+            frozen : [bool] list of parameters to not optimize. Default: False
+            num_starts : Number of times to run L-BFGS. 
+                         Only available for bounded optimization.
+            verbose : level of verbosity. Default : 1
+        returns:
+            GPObject with new parameters.
+    """
+    #TODO : Check
+    if option == "B":
+        bounds = kwargs.get("bounds")
+        if not bounds:
+            raise TypeError("Bounds required for bounded optimizaton")
+        _param_opt = functools.partial(_optimize_single_start_b,
+                        kernel = kernel,noisekernel = noisekernel,data=data)
+    elif option == "U":
+        positives = kwargs.get("positives")
+        if not positives:
+            raise TypeError("Positives required for unbounded optimization")
+        _param_opt = functools.partial(_optimize_single_start_u,
+                                       kernel=kernel,noisekernel=noisekernel,
+                                       data=data)
+    nll,hparams_new = _param_opt(hparams = hparams,**kwargs)
+    verbose = kwargs.get("verbose")
+    if verbose >= 1:
+        print(1,nll)
+    if option == "B":
+        num_starts = kwargs.get("num_starts",1)
+        for i in range(1,num_starts):
+            hparams_test = _sample_params(hparams,bounds)
+            nll_test,hparams_test = _param_opt(hparams = hparams_test,
+                                               **kwargs)
+            if nll_test < nll:
+                hparams_new = hparams_test
+            if verbose >= 1:
+                print(i+1,nll_test)
+    gpnew = GPObject(kernel,noisekernel,hparams_new,
+                              data)
+    return gpnew
+
+
+def _optimize_single_start_b(kernel,noisekernel,hparams,
+                           data,**kwargs):
+    #LBFG-S, no warping, Chang Yong-Oh implementation, bounded
+    bounds = kwargs.get("bounds")
+    verbose = kwargs.get("verbose")
+    max_iter = kwargs.get("max_iter",100)
+    line_search_fn = kwargs.get("line_search_fn","goldstein")
+    frozen = kwargs.get("frozen",False)
+    if frozen == False:
+        frozen = [False]*len(hparams)
+    xdata,ydata = data
+    assert len(frozen) == len(hparams)
+    for i,_ in enumerate(hparams): #Convert to tensor
+        hparams[i] = torch.tensor(hparams[i])
+    for i,_ in enumerate(bounds):
+        bounds[i] = (torch.tensor(bounds[i][0]),
+                     torch.tensor(bounds[i][1]))
+    def _negative_log_likelihood(hparams):
+        hparams_feed = [None]*len(hparams)
+        for i,_ in enumerate(hparams):
+            hparams_feed[i] = hparams[i].clone()
+        if verbose >= 2:
+            print([h.item() for h in hparams_feed])
+        try:
+            gpnew = GPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = -gpnew.loglikelihood
+        except RuntimeError:
+            result = 1e12 + sum(hparams_feed)
+        if verbose >= 2:
+            print(result.item())
+            print("-"*10)
+        return result
+    
+    #Adjust hparams so we can differentiate
+    hparams_new = []
+    for i,hparam in enumerate(hparams):
+        #TODO : Put adjustable here
+        hparam_new = hparam.clone()
+        hparam_new.requires_grad_()
+        hparams_new.append(hparam_new)
+    #Set the hparams to optimize (only those not frozen)
+    notfrozen = utils.list_not(frozen)
+    hparams_to_opt = utils.bool_slice(hparams_new,notfrozen)
+    bounds_not_frozen = utils.bool_slice(bounds,notfrozen)
+    #Optmizer
+    optimizer = lbfgs.LBFGS(hparams_to_opt,max_iter=max_iter,
+                            bounds=bounds_not_frozen,
+                            line_search_fn = line_search_fn)
+    optimizer.zero_grad()
+    def closure():
+        optimizer.zero_grad()
+        nll = _negative_log_likelihood(hparams_new)
+        nll.backward(retain_graph=True)
+        return nll
+    loss = optimizer.step(closure)
+    #Create new gp
+    for i,_ in enumerate(hparams_new):
+        hparams_new[i].requires_grad = False
+    return loss,hparams_new
+    
+def _optimize_single_start_u(kernel,noisekernel,hparams,
+                           data,**kwargs):
+    raise NotImplementedError
+
+#==============================================================================
+# AUXILIARY FUNCTIONS
+#==============================================================================
+def _sample_params(hparams,bounds):
+    lb,ub = list(zip(*bounds))
+    lb,ub = np.array(lb),np.array(ub)
+    n = len(hparams)
+    return list(np.random.random(n)*(ub - lb) + lb)

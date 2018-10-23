@@ -95,7 +95,7 @@ def expand_cholesky_with_matrix(U,V,C):
        V : a (n,d) 2d aray
        C : a (d,d) 2d array
        
-       Assumes that [K V^T, V C] will be positive-definite
+       Assumes that [[K V],[V^T C]] will be positive-definite
        
        returns : upper cholesky factor of the matrix
            K   V

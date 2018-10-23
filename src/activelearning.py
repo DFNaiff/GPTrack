@@ -56,7 +56,7 @@ def choose_next_mo(gp,t0,t1,
     #Calculating tolerable error
     covlims = max_cov(max_error,confidence)
     #Checking whether there is too much uncertainty already
-    covs0 = np.diag(gp.predict_batch([[i,t0] for i in range(nout)])[1])
+    covs0 = gp.predict_batch([[i,t0] for i in range(nout)])[1]
     for i,cov0 in enumerate(covs0):
         if cov0 >= covlims[i]: #Measure right away
             tnews[i] = t0
@@ -65,7 +65,7 @@ def choose_next_mo(gp,t0,t1,
         if tnews[i] != None: #Already measures right away
             continue
         def f(t):
-            return gpchoice.predict(t)[0] - covlim
+            return gpchoice.predict([t])[0] - covlim
         covlim = covlims[i]
         tdata = [t0,t1]
         is_above = False
@@ -79,20 +79,20 @@ def choose_next_mo(gp,t0,t1,
         #Getting more points for data
         tdata.extend(list(np.linspace(tdata[-2],tdata[-1],6)[1:-1]))
         tdatab = [[i,t] for t in tdata]
+        tdata = np.array(tdata).reshape(-1,1)
+        tdatab = np.array(tdatab)
         #Preparing GP        
-        zdata = np.diag(gp.predict_batch(tdatab)[1]) #Measured covs
-        print(tdata)
-        print(tdatab)
-        print(gp.predict_batch)
-        print(zdata)
+        zdata = gp.predict_batch(tdatab)[1] #Measured covs
         choicekernel = kernels.Constant()*kernels.IsoRBF(dim=1)
         choicenoisekernel = kernels.IIDNoiseKernel()
-        print(i,'ok')
         gpchoice = gpobject.GPObject(choicekernel,choicenoisekernel,
                     np.array([1.0,1.0,1e-6]),[tdata,zdata])
         try:
-            gpchoice = gpchoice.optimize([True,True,True],[True,True,False],
-                                         [None,None,"log"],verbose=0)
+            gp = gp.optimize(option="B",verbose=0,num_starts = 1,
+                             bounds=[[1e-2,1e2],[1e-2,1e2],[1e-8,1e0]],
+                             line_search_fn = "goldstein",max_iter=5)
+#            gpchoice = gpchoice.optimize([True,True,True],[True,True,False],
+#                                         [None,None,"log"],verbose=0)
         except:
             print("Error in GP optimization on active learning")
         #Calculating t
@@ -118,6 +118,7 @@ def choose_next_single(gp,t0,t1,
         until t_i extrapolates covariance. 
         Then find zero between t_{i-1} and t_i using GP
     """
+    raise NotImplementedError
     def f(t):
         return gpchoice.predict(t)[0] - covlim
     #Calculating tolerable error

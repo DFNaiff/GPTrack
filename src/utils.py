@@ -15,6 +15,20 @@ def binary_function_matrix(f,L):
     return M
 
 
+def binary_function_matrix_vec(f,x):
+    """
+        f : two argument function
+        x : an n x m array        
+        returns : n x n array M, where M[i,j] = f(l_i,l_j) 
+    """
+    n = x.shape[0]
+    X1 = np.repeat(x.numpy(),n,axis=0)
+    X2 = np.tile(x.numpy(),[n,1])
+    K = f(X1,X2)
+    K = K.reshape(n,n)
+    return K
+
+
 def binary_function_matrix_2(f,L1,L2):
     """
         f : two argument function
@@ -24,6 +38,15 @@ def binary_function_matrix_2(f,L1,L2):
     """
     M = np.array([[f(li,lj) for lj in L2] for li in L1])
     return M
+
+
+def bool_slice(L,b):
+    """
+        L : list
+        b : list of booleans (same size as L)
+        returns : the same as L[b] if L was an array
+    """
+    return [L[i] for i in range(len(b)) if b[i]]
 
 
 def complete_with_zeros(x,n):
@@ -116,6 +139,10 @@ def hypersphere_param_derivative2(n,thetas,j):
     return dw0
 
 
+def list_not(b):
+    return [not bb for bb in b]
+
+
 def nth_index(iterable, value, n):
     matches = (idx for idx, val in enumerate(iterable) if val == value)
     return next(itertools.islice(matches, n-1, n), None)
@@ -160,7 +187,8 @@ def roundodd(x):
     
     
 def sqexp(x,y,l,theta=1.0):
-    return theta*np.exp(-0.5*np.sum((np.square(x-y)/(l**2))))
+    return theta*np.exp(-0.5*np.sum((np.square(x-y)/(l**2)),
+                                    axis=1,keepdims=True))
 
 
 def triangular(i):

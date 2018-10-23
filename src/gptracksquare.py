@@ -69,10 +69,10 @@ class GPTrackSquare(object):
         self.xdata,self.zdata,\
         self.ndata,self.ndataout,self.datalocation,\
         drop_inds = _increment_data((self.xdata,self.zdata),
-                                   (x_t,z_t),self.gpmargin.gplist,
-                                   self.max_data,
-                                   self.ndata,self.ndataout,
-                                   self.datalocation)
+                                    (x_t,z_t),self.gpmargin.gplist,
+                                    self.max_data,
+                                    self.ndata,self.ndataout,
+                                    self.datalocation)
         for i in range(self.gpmargin.eta):
             # Upgrades the GPs, revising covariance matrix,
             # data-dependent term to allow for dropped data
