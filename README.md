@@ -1,2 +1,2 @@
-Gaussian process for multiple output tracking and inference.
-UNDER CONSTRUCTION.
+Gaussian process for multiple output tracking and inference, using PyTorch
+UNDER CONSTRUCTION
