@@ -11,6 +11,9 @@ from . import utilsla
 from . import utilstorch
 
 
+LOG2PI = float(np.log(2*np.pi))
+
+
 #TODO : You may be holding K on memory without needing
 class GPObject(object):
     def __init__(self,kernel,noise_kernel,hparams,data,
@@ -197,6 +200,31 @@ class GPObject(object):
         term3 = 0.5*self.numdata*np.log(2*np.pi)
         self.loglikelihood = -(term1 + term2 + term3)
     
+    #LOO and cross validation functions
+    def _loo_error(self):
+        #Since the derivative of potri is not implemented, optimization 
+        #is not possible. Possible solution: implement derivative of potri
+        #or find a way to do it through Cholesky only
+        """
+            Calculates the leave one out error
+        """
+        #Invert matrix
+        invK = torch.potri(self.U)
+        Ky = torch.matmul(self.K,self.ydata)
+        error = 0
+        for i in range(self.numdata):
+            loo_single = self._loo_error_single(invK,Ky,i)
+            error += loo_single
+        return error
+    
+    def _loo_error_single(self,invK,Ky,i):
+        sigma2 = 1.0/invK[i,i]
+        mu = self.ydata[i] - sigma2*Ky[i]
+        term1 = -0.5*torch.log(sigma2)
+        term2 = -0.5*(self.ydata[i] - mu)**2/sigma2
+        term3 = self.numdata/2*LOG2PI
+        return term1 + term2 + term3
+        
     #Input conversion
     def _convert_input_single(self,x):
         return torch.tensor(x).float()
@@ -238,7 +266,6 @@ def _optimize(kernel,noisekernel,hparams,
         returns:
             GPObject with new parameters.
     """
-    #TODO : Check
     if option == "B":
         bounds = kwargs.get("bounds")
         if not bounds:
@@ -279,6 +306,7 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     max_iter = kwargs.get("max_iter",100)
     line_search_fn = kwargs.get("line_search_fn","goldstein")
     frozen = kwargs.get("frozen",False)
+    to_optimize = kwargs.get("to_optimize","likelihood")
     if frozen == False:
         frozen = [False]*len(hparams)
     xdata,ydata = data
@@ -297,7 +325,10 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
         try:
             gpnew = GPObject(kernel,noisekernel,hparams_feed,
                              (xdata,ydata))
-            result = -gpnew.loglikelihood
+            if to_optimize == "loo_error":
+                result = gpnew._loo_error()
+            else:
+                result = -gpnew.loglikelihood
         except RuntimeError:
             result = 1e12 + sum(hparams_feed)
         if verbose >= 2:
@@ -308,7 +339,6 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     #Adjust hparams so we can differentiate
     hparams_new = []
     for i,hparam in enumerate(hparams):
-        #TODO : Put adjustable here
         hparam_new = hparam.clone()
         hparam_new.requires_grad_()
         hparams_new.append(hparam_new)
