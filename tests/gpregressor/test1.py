@@ -18,11 +18,11 @@ noisekernel = kernels.IIDNoiseKernel()
 hparams = np.array([1.0,1.0,1e-1])
 bounds = [[0.01,10.0],[0.1,10.0],[1e-3,1e1]]
 cvbatch = [list(range(6)),list(range(6,11)),
-           list(range(11,16)),list(range(16,22))]
+           list(range(11,16)),list(range(16,21))]
 #cvbatch = [list(range(i,i+1)) for i in range(0,21)]
 gp = gpobject.GPObject(kernel,noisekernel,hparams,[X,Y])
 gp = gp.optimize(bounds=bounds,verbose=2,
-                 to_optimize = "loo_error",
+                 to_optimize = "crossvalidation",
                  cvbatch = cvbatch)
 
 xpred = np.linspace(0,1).reshape(-1,1)

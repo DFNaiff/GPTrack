@@ -78,28 +78,25 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
                 hparams_feed[i] = _inv_warp_transform(warp_dict[i])(hparams[i])
             else:
                 hparams_feed[i] = hparams[i].clone()
-        try:
-            if to_optimize == "likelihood":
-                gpnew = NLLGPObject(kernel,noisekernel,hparams_feed,
-                                 (xdata,ydata))
-                result = -gpnew.loglikelihood
-            elif to_optimize == "loo_error":
-                gpnew = _LOOGPObject(kernel,noisekernel,hparams_feed,
-                                 (xdata,ydata))
-                result = gpnew._mse_loo_error()
-            elif to_optimize == "crossvalidation":
-                gpnew = _LOOGPObject(kernel,noisekernel,hparams_feed,
-                                 (xdata,ydata))
-                result = gpnew._mse_cv_error(cvbatch)
-        except RuntimeError:
-            result = 1e12 + sum(hparams_feed)
+        if to_optimize == "likelihood":
+            gpnew = NLLGPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = -gpnew.loglikelihood
+        elif to_optimize == "loo_error":
+            gpnew = _LOOGPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = gpnew._mse_loo_error()
+        elif to_optimize == "crossvalidation":
+            gpnew = _LOOGPObject(kernel,noisekernel,hparams_feed,
+                             (xdata,ydata))
+            result = gpnew._mse_cv_error(cvbatch)
         return result
     #Load necessary parameters
     bounds = kwargs.get("bounds")
     verbose = kwargs.get("verbose")
     max_iter = kwargs.get("max_iter",100)
     line_search_fn = kwargs.get("line_search_fn","goldstein")
-    frozen = kwargs.get("frozen",False)
+    frozen = kwargs.get("frozen",dict())
     to_optimize = kwargs.get("to_optimize","likelihood")
     warp_dict = kwargs.get("warpings",dict())
     if to_optimize == "crossvalidation":
