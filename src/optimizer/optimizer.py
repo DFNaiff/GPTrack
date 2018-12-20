@@ -31,7 +31,8 @@ def optimize(kernel,noisekernel,hparams,
                       optimization. Default : "sqrt"
             bounds : [(lb,ub),] list of lower and upper bounds. 
                      Used for bounded optimization
-            frozen : [bool] list of parameters to not optimize. Default: False
+            frozen : list of parameters to be frozen, indexed by 
+                     parameter number
             num_starts : Number of times to run L-BFGS. 
                          Only available for bounded optimization.
             verbose : level of verbosity. Default : 1
@@ -96,17 +97,18 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     verbose = kwargs.get("verbose")
     max_iter = kwargs.get("max_iter",100)
     line_search_fn = kwargs.get("line_search_fn","goldstein")
-    frozen = kwargs.get("frozen",dict())
+    frozen = kwargs.get("frozen",list())
     to_optimize = kwargs.get("to_optimize","likelihood")
     warp_dict = kwargs.get("warpings",dict())
     if to_optimize == "crossvalidation":
         cvbatch = kwargs.get("cvbatch",None)
         assert cvbatch != None
-    
+    frozenlist = [False]*len(hparams)
+    for ind in frozen:
+        frozenlist[ind] = True
     if frozen == False:
         frozen = [False]*len(hparams)
     xdata,ydata = data
-    assert len(frozen) == len(hparams)
     for i,_ in enumerate(hparams): #Convert to tensor
         hparams[i] = torch.tensor(hparams[i])
     for i,_ in enumerate(bounds):
@@ -125,7 +127,7 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
         hparam_new.requires_grad_()
         hparams_new.append(hparam_new)
     #Set the hparams to optimize (only those not frozen)
-    notfrozen = utils.list_not(frozen)
+    notfrozen = utils.list_not(frozenlist)
     hparams_to_opt = utils.bool_slice(hparams_new,notfrozen)
     bounds_not_frozen = utils.bool_slice(bounds,notfrozen)
     #Optmizer

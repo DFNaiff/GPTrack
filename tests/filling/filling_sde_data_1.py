@@ -9,15 +9,14 @@ from src import kernels,gpobject
 
 #This test is about filling an extremely regular data
 
-data = np.load("../datasets/process2b.npz")
+data = np.load("../datasets/process3a.npz")
 
 ndata = 100
 nsplit = 50
-T = data['T'][:ndata]
-X = data['X'][:ndata]
-Y = data['Y'][:ndata]
-Z = data['Z'][:ndata]
-
+T = 100*data['T'][:ndata]
+datay = data['X'][:ndata,:]
+X,Y,Z = datay[:,0],datay[:,1],datay[:,2]
+X = X - 3;Y = Y - 3; Z = Z - 3;
 
 
 def set_data(T,Ylist,Z,p=0.5,nprevious=10):
@@ -56,18 +55,19 @@ def set_data(T,Ylist,Z,p=0.5,nprevious=10):
 Xtrain,Ytrain,Xdata,Ydata = set_data(T,[X,Y],Z,nprevious = nsplit)
 
 kernel = kernels.TensorProd(kernels.SphericalCorr(3),
-                            kernels.IsoMatern32(dim=1))
+                            kernels.IsoMatern12(dim=1))
 noisekernel = kernels.MONoiseKernel(3)
 
 positives = [True,True,False,True,True,True]
 hparams = [0.7965539693832397, 0.8695805072784424, 0.8,
-           1.0,1.0,0.8400896787643433, 60.11109161376953,
+           2.44613576, 1.24955929, 1.3945214, 
+           60.11109161376953,
            1e-1,1e-1,1e-1]
 positives = [True,True,True,
              False,False,False,
              True,
              True,True,True]
-bounds = [(1e-4,1e4)]*3+[(-np.pi,np.pi)]*3 + [(1e-4,1e4)] + \
+bounds = [(1e-4,1e0)]*3+[(0.0,np.pi)]*3 + [(1e-4,1e4)] + \
          [(1e-8,1e3)]*3
 frozen = []
 #Kernel testing
@@ -89,24 +89,24 @@ T2 = np.hstack([2.0*np.ones((ndata,1)),T.reshape(-1,1).astype(float)])
 Xpred = gp.predict_batch(T0,getvar = False).flatten()
 Ypred = gp.predict_batch(T1,getvar = False).flatten()
 Zpred = gp.predict_batch(T2,getvar = False).flatten()
-#Prediction
-#Ypred = []
-#Zpred = []
-#for t in T:
-#    ypred = gp.predict([[0.0,np.float(t)]])[0][0,0]
-#    zpred = gp.predict([[1.0,np.float(t)]])[0][0,0]
-#    Ypred.append(ypred)
-#    Zpred.append(zpred)
+
+def plot_train(ind,S,Y):
+    s = [i for i in range(len(S[:,0])) if 
+         int(S[i,0]) == ind]
+    T = S[s,1]
+    X = Y[s]
+    plt.plot(T,X,'go')
+    return X,T
 plt.figure()
 plt.plot(T,X,'b')
-#plt.plot(T,xtrain[:ntraining,1],'go')
 plt.plot(T,Xpred,'r')
-
+plot_train(0,Xdata,Ydata)
 plt.figure()
 plt.plot(T,Y,'b')
-#plt.plot(T,xtrain[:ntraining,1],'go')
 plt.plot(T,Ypred,'r')
+plot_train(1,Xdata,Ydata)
 plt.figure()
 plt.plot(T,Z,'b')
 plt.plot(T,Zpred,'r')
-plt.axvline(x=nsplit)
+plot_train(2,Xdata,Ydata)
+plt.axvline(x=T[nsplit])
