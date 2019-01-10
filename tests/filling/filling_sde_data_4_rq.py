@@ -69,7 +69,7 @@ covchol = np.linalg.cholesky(covmatrix).transpose()
 mokernelparams = list(np.hstack([np.diag(covchol,k=k) 
                         for k in range(2,-1,-1)]))
 kernel = kernels.TensorProd(kernels.SphericalCorr(3),
-                            kernels.RationalQuadratic(dim=1))
+                            kernels.SpectralGaussian())
 noisekernel = kernels.MONoiseKernel(3)
 
 positives = [True,True,False,True,True,True]

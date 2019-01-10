@@ -107,7 +107,7 @@ class GPObject(object):
         self._update_likelihood()
         self.is_empty = False
             
-    def optimize(self,option="B",**kwargs):
+    def optimize(self,option="B",return_bic=False,**kwargs):
         """
             Choose new parameters for the GP based on 
             MLE estimation.
@@ -125,14 +125,18 @@ class GPObject(object):
                 verbose : level of verbosity. Default : 1
             returns:
                 GPObject with new parameters.
+                Bayes Information Criterion calculated
         """
-        hparams_new =  gpoptimizer.optimize(self.kernel,self.noisekernel,
+        hparams_new,bic =  gpoptimizer.optimize(self.kernel,self.noisekernel,
                          self.hparams,(self.xdata,self.ydata),
                          option,**kwargs)
         gpnew = GPObject(self.kernel,self.noisekernel,hparams_new,
                                   (self.xdata,self.ydata))
-        return gpnew
-        
+        if return_bic:
+            return gpnew,bic
+        else:
+            return gpnew
+
     def _initialize_kernels(self,kernel,noisekernel,hparams):
         self.hparams = [None]*len(hparams)
         for i,_ in enumerate(hparams): #Convert to tensor

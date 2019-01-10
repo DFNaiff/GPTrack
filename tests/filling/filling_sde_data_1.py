@@ -76,7 +76,9 @@ gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xtrain,Ytrain))
 print(gp.showhparams())
 start_time = time.clock()
 gp = gp.optimize(option="B",verbose=2,num_starts = 1,
-                 bounds=bounds,line_search_fn = "goldstein")
+                 bounds=bounds,opt_choice="cg",
+                 beta_update_fn = "FR",
+                 line_search_fn = "goldstein")
 end_time = time.clock()
 print(end_time - start_time)
 hparams = gp.showhparams()

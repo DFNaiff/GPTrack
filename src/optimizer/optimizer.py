@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from . import lbfgs
+from . import cg
 from .. import utils
 from .. import utilstorch
 
@@ -52,7 +53,7 @@ def optimize(kernel,noisekernel,hparams,
         _param_opt = functools.partial(_optimize_single_start_u,
                                        kernel=kernel,noisekernel=noisekernel,
                                        data=data)
-    nll,hparams_new = _param_opt(hparams = hparams,**kwargs)
+    nll,hparams_new,bic = _param_opt(hparams = hparams,**kwargs)
     verbose = kwargs.get("verbose")
     if verbose >= 1:
         print(1,nll)
@@ -60,13 +61,15 @@ def optimize(kernel,noisekernel,hparams,
         num_starts = kwargs.get("num_starts",1)
         for i in range(1,num_starts):
             hparams_test = _sample_params(hparams,bounds)
-            nll_test,hparams_test = _param_opt(hparams = hparams_test,
-                                               **kwargs)
+            nll_test,hparams_test,bic_test = _param_opt(hparams = hparams_test,
+                                                        **kwargs)
             if nll_test < nll:
                 hparams_new = hparams_test
+                nll = nll_test
+                bic = bic_test
             if verbose >= 1:
                 print(i+1,nll_test)
-    return hparams_new
+    return hparams_new,bic
 
 def _optimize_single_start_b(kernel,noisekernel,hparams,
                            data,**kwargs):
@@ -96,6 +99,8 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     bounds = kwargs.get("bounds")
     verbose = kwargs.get("verbose")
     max_iter = kwargs.get("max_iter",100)
+    opt_choice = kwargs.get("opt_choice","lbfgs")
+    beta_update_fn = kwargs.get("beta_update_fn","PR")
     line_search_fn = kwargs.get("line_search_fn","goldstein")
     frozen = kwargs.get("frozen",list())
     to_optimize = kwargs.get("to_optimize","likelihood")
@@ -131,9 +136,16 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     hparams_to_opt = utils.bool_slice(hparams_new,notfrozen)
     bounds_not_frozen = utils.bool_slice(bounds,notfrozen)
     #Optmizer
-    optimizer = lbfgs.LBFGS(hparams_to_opt,max_iter=max_iter,
-                            bounds=bounds_not_frozen,
-                            line_search_fn = line_search_fn)
+    if opt_choice == "lbfgs":
+        optimizer = lbfgs.LBFGS(hparams_to_opt,max_iter=max_iter,
+                                bounds=bounds_not_frozen,
+                                line_search_fn = line_search_fn)
+    elif opt_choice == "cg":
+        optimizer = cg.CG(hparams_to_opt,max_iter=max_iter,
+                          bounds=bounds_not_frozen,
+                          beta_update_fn = beta_update_fn,
+                          line_search_fn = line_search_fn)
+
     optimizer.zero_grad()
     def closure():
         optimizer.zero_grad()
@@ -150,7 +162,12 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
         hparams_new[i].requires_grad = False
         if i in warp_dict: #Take off warping
             hparams_new[i] = _inv_warp_transform(warp_dict[i])(hparams_new[i])
-    return loss,hparams_new
+    #Calculate Bayes information criterion
+    if loss >= 0:
+        bic = np.inf
+    else:
+        bic = np.log(len(xdata))*len(hparams_to_opt) + 2*loss
+    return loss,hparams_new,bic
     
 def _optimize_single_start_u(kernel,noisekernel,hparams,
                            data,**kwargs):
