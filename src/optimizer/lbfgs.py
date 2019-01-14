@@ -292,6 +292,8 @@ class LBFGS(Optimizer):
             numel = p.numel()
             l_bnd, u_bnd = bnd
             p_grad = d[offset:offset + numel].resize_(p.size())
+            min_l_bnd = float('inf')
+            min_u_bnd = float('inf')
             if l_bnd is not None:
                 from_l_bnd = ((l_bnd-p.data)/p_grad)[p_grad<0]
                 min_l_bnd = torch.min(from_l_bnd) if from_l_bnd.numel() > 0 else max_alpha
@@ -301,7 +303,6 @@ class LBFGS(Optimizer):
             max_alpha = min(max_alpha, min_l_bnd, min_u_bnd)
             offset += numel
         return max_alpha
-
 
     def _backtracking(self, closure, d):
         # 0 < rho < 0.5 and 0 < w < 1

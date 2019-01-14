@@ -20,17 +20,16 @@ samples = np.random.choice(np.arange(ndata,dtype=int),
                            replace=False)
 X = Xtrue[samples].reshape(-1,1)
 Y = Ytrue[samples].reshape(-1,1)
-kernel = kernels.Constant()*kernels.SpectralGaussian() + \
-         kernels.Constant()*kernels.SpectralGaussian() + \
-         kernels.Constant()*kernels.SpectralGaussian()
+kernel = kernels.Constant()*kernels.IsoMatern52(dim=1)
 noisekernel = kernels.IIDNoiseKernel()
-hparams = np.array([1.0,10.0,3.0]*3 + [1e-1])
-bounds = [[0.01,10.0],[0.1,10.0],[1e-4,1e1]]*3 + [[1e-3,1e1]]
+hparams = np.array([1.0,10.0] + [1e-1])
+bounds = [[0.01,10.0],[0.1,10.0]] + [[1e-3,1e1]]
 
 #cvbatch = [list(range(i,i+1)) for i in range(0,21)]
 gp = gpobject.GPObject(kernel,noisekernel,hparams,[X,Y])
-gp = gp.optimize(bounds=bounds,verbose=2)
-
+gp,bic = gp.optimize(return_bic=True,bounds=bounds,verbose=2,opt_choice="cg",
+                     beta_update_fn="FR",line_search_fn="goldstein")
+print(bic)
 xpred = np.linspace(0,1).reshape(-1,1)
 ypred,cypred = gp.predict_batch(Xtrue.reshape(-1,1))
 

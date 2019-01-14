@@ -16,13 +16,14 @@ Y = loadfile["Y"].reshape(-1,1)
 kernel = kernels.Constant()*kernels.IsoRBF(dim=1)
 noisekernel = kernels.IIDNoiseKernel()
 hparams = np.array([0.5,0.2,0.05])
-bounds = [[0.01,10.0],[0.1,10.0],[1e-3,1e1]]
-cvbatch = [list(range(6)),list(range(6,11)),
-           list(range(11,16)),list(range(16,21))]
-#cvbatch = [list(range(i,i+1)) for i in range(0,21)]
+bounds = {0:[1e-6,None],
+          1:[1e-6,None],
+          2:[1e-6,None]}
+warpings = {0:'sqrt',1:'sqrt',2:'sqrt'}
 gp = gpobject.GPObject(kernel,noisekernel,hparams,[X,Y])
-gp = gp.optimize(bounds=bounds,verbose=2,opt_choice="cg",
-                 beta_update_fn="FR",line_search_fn="goldstein")
+gp = gp.optimize(bounds={},verbose=2,opt_choice="lbfgs",
+                 beta_update_fn="FR",line_search_fn="goldstein",
+                 warpings = warpings)
 
 xpred = np.linspace(0,1).reshape(-1,1)
 ypred,cypred = gp.predict_batch(xpred)

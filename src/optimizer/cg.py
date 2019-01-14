@@ -263,6 +263,8 @@ class CG(Optimizer):
             numel = p.numel()
             l_bnd, u_bnd = bnd
             p_grad = d[offset:offset + numel].resize_(p.size())
+            min_l_bnd = float('inf')
+            min_u_bnd = float('inf')
             if l_bnd is not None:
                 from_l_bnd = ((l_bnd-p.data)/p_grad)[p_grad<0]
                 min_l_bnd = torch.min(from_l_bnd) if from_l_bnd.numel() > 0 else max_alpha
@@ -286,7 +288,6 @@ class CG(Optimizer):
         alpha_k = 1.0
         while True:
             self._set_param_incremental(alpha_k, d)
-#            phi_k = closure().data[0]
             phi_k = closure().item()
             self._set_param(original_param_data_list)
             if phi_k <= phi_0 + rho * alpha_k * phi_0_prime:
@@ -310,7 +311,6 @@ class CG(Optimizer):
         alpha_k = min(1e4, (a_k + b_k) / 2.0)
         while True:
             self._set_param_incremental(alpha_k, d)
-#            phi_k = closure().data[0]
             phi_k = closure().item()
             self._set_param(original_param_data_list)
             if phi_k <= phi_0 + rho*alpha_k*phi_0_prime:

@@ -40,25 +40,16 @@ def optimize(kernel,noisekernel,hparams,
         returns:
             GPObject with new parameters.
     """
-    if option == "B":
-        bounds = kwargs.get("bounds")
-        if not bounds:
-            raise TypeError("Bounds required for bounded optimizaton")
-        _param_opt = functools.partial(_optimize_single_start_b,
-                        kernel = kernel,noisekernel = noisekernel,data=data)
-    elif option == "U":
-        positives = kwargs.get("positives")
-        if not positives:
-            raise TypeError("Positives required for unbounded optimization")
-        _param_opt = functools.partial(_optimize_single_start_u,
-                                       kernel=kernel,noisekernel=noisekernel,
-                                       data=data)
+    bounds = kwargs.get("bounds")
+    _param_opt = functools.partial(_optimize_single_start_b,
+                    kernel = kernel,noisekernel = noisekernel,data=data)
     nll,hparams_new,bic = _param_opt(hparams = hparams,**kwargs)
     verbose = kwargs.get("verbose")
     if verbose >= 1:
         print(1,nll)
     if option == "B":
         num_starts = kwargs.get("num_starts",1)
+        if num_starts > 1: raise NotImplementedError
         for i in range(1,num_starts):
             hparams_test = _sample_params(hparams,bounds)
             nll_test,hparams_test,bic_test = _param_opt(hparams = hparams_test,
@@ -71,11 +62,11 @@ def optimize(kernel,noisekernel,hparams,
                 print(i+1,nll_test)
     return hparams_new,bic
 
+
 def _optimize_single_start_b(kernel,noisekernel,hparams,
                            data,**kwargs):
-    #LBFG-S, Chang Yong-Oh implementation, bounded
     #The function that will be optimized
-    def _f(hparams):
+    def _f(hparams): #Function to be optimized
         hparams_feed = [None]*len(hparams)
         for i,_ in enumerate(hparams):
             if i in warp_dict: #Take off warping
@@ -96,7 +87,7 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
             result = gpnew._mse_cv_error(cvbatch)
         return result
     #Load necessary parameters
-    bounds = kwargs.get("bounds")
+#    bounds = kwargs.get("bounds")
     verbose = kwargs.get("verbose")
     max_iter = kwargs.get("max_iter",100)
     opt_choice = kwargs.get("opt_choice","lbfgs")
@@ -105,30 +96,38 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     frozen = kwargs.get("frozen",list())
     to_optimize = kwargs.get("to_optimize","likelihood")
     warp_dict = kwargs.get("warpings",dict())
+    bounds_dict = kwargs.get("bounds",dict())
     if to_optimize == "crossvalidation":
         cvbatch = kwargs.get("cvbatch",None)
         assert cvbatch != None
+    #Prepare data and hyperparameters
+    xdata,ydata = data
+    for i,_ in enumerate(hparams): #Convert to tensor
+        hparams[i] = torch.tensor(hparams[i])
+    #Prepare list of frozen indexes
     frozenlist = [False]*len(hparams)
     for ind in frozen:
         frozenlist[ind] = True
     if frozen == False:
         frozen = [False]*len(hparams)
-    xdata,ydata = data
-    for i,_ in enumerate(hparams): #Convert to tensor
-        hparams[i] = torch.tensor(hparams[i])
-    for i,_ in enumerate(bounds):
-        bounds[i] = (torch.tensor(bounds[i][0]),
-                     torch.tensor(bounds[i][1]))
-    
+    #Prepare bounds
+    bounds = []
+    for i,_ in enumerate(hparams):
+        if i in bounds_dict:
+            b = bounds_dict[i]
+            if b[0] != None:
+                b[0] = torch.tensor(b[0])
+            if b[1] != None:
+                b[1] = torch.tensor(b[1])
+            bounds.append(b)
+        else:
+            bounds.append([None,None])
     #Adjust hparams so we can differentiate
     hparams_new = []
     for i,hparam in enumerate(hparams):
         hparam_new = hparam.clone()
         if i in warp_dict: #Warp
-            print("warping",i)
-            print(hparam_new)
             hparam_new = _warp_transform(warp_dict[i])(hparam_new)
-            print(hparam_new)
         hparam_new.requires_grad_()
         hparams_new.append(hparam_new)
     #Set the hparams to optimize (only those not frozen)
@@ -147,7 +146,7 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
                           line_search_fn = line_search_fn)
 
     optimizer.zero_grad()
-    def closure():
+    def closure(): #Closure function
         optimizer.zero_grad()
         nll = _f(hparams_new)
         if verbose >= 2:
@@ -163,15 +162,8 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
         if i in warp_dict: #Take off warping
             hparams_new[i] = _inv_warp_transform(warp_dict[i])(hparams_new[i])
     #Calculate Bayes information criterion
-    if loss >= 0:
-        bic = np.inf
-    else:
-        bic = np.log(len(xdata))*len(hparams_to_opt) + 2*loss
+    bic = np.log(len(xdata))*len(hparams_to_opt) + 2*loss
     return loss,hparams_new,bic
-    
-def _optimize_single_start_u(kernel,noisekernel,hparams,
-                           data,**kwargs):
-    raise NotImplementedError
 
 
 #==============================================================================
@@ -377,6 +369,6 @@ def _warp_transform(name):
 
 def _inv_warp_transform(name):
     if name == "sqrt":
-        return torch.square
+        return (lambda x : torch.pow(x,2))
     if name == "log":
         return torch.exp
