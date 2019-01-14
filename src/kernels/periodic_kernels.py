@@ -12,6 +12,7 @@ class PerKernel(Kernel):
         self.nhyper = 2
         self.hyperparams = None
         self.initialized = False
+        self.positives = [True,True]
         
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper

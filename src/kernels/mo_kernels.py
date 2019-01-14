@@ -24,6 +24,7 @@ class SphericalCorr(Kernel):
         self.hyperparams = None
         self.W = None
         self.initialized = False
+        self.positives = [True]*nout + [False]*(nout*(nout-1)//2)
 
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
@@ -57,6 +58,12 @@ class SphericalCorr(Kernel):
 class CholeskyCorr(Kernel):
     """
         Cholesky correlation kernel, with nout outputs.
+        The hparam order is:
+        1 n+1 ...     n(n+1)/2
+           2   n+2
+                3  ...
+                   ...
+                        n
     """
     def __init__(self,nout):
         raise NotImplementedError
@@ -66,10 +73,11 @@ class CholeskyCorr(Kernel):
         self.hyperparams = None
         self.W = None
         self.initialized = False
+        self.positives = [True]*nout + [False]*(nout*(nout-1)//2)
 
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
-        self.hyperparams = hyperparams
+        self.hyperparams = hyperparams[::-1]
         U = torch.zeros((self.nout,self.nout))
         for i in range(1,self.nout+1):
             start_ind = utils.triangular(i-1)

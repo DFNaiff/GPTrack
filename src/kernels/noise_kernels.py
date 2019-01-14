@@ -16,6 +16,7 @@ class IIDNoiseKernel(Kernel):
         self.is_diagonal = True
         self.hyperparams = None
         self.initialized = False
+        self.positives = [True]
         
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
@@ -50,7 +51,8 @@ class MONoiseKernel(Kernel):
         self.nhyper = nout
         self.hyperparams = None
         self.initialized = False
-        
+        self.positives = [True]*nout
+
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
         self.hyperparams = hyperparams

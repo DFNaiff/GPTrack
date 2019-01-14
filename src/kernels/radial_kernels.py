@@ -12,6 +12,7 @@ class IsoRadKernel(Kernel):
         self.nhyper = 1
         self.hyperparams = None
         self.initialized = False
+        self.positives = [True]
         
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
@@ -87,6 +88,7 @@ class IsoRationalQuadratic(IsoRadKernel):
     def __init__(self,dim):
         super(IsoRationalQuadratic,self).__init__(dim)
         self.nhyper = 2
+        self.positives = [True,True]
         
     def f(self,x,y):
         r2 = torch.tensor(torch.sum((x - y)**2,1,keepdim=True) / \
@@ -99,6 +101,7 @@ class ARDRadKernel(Kernel):
         self.nhyper = dim
         self.hyperparams = None
         self.initialized = False
+        self.positives = [True]*self.nhyper
         
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper

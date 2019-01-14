@@ -27,7 +27,7 @@ bounds = [[0.01,10.0],[0.1,10.0]] + [[1e-3,1e1]]
 
 #cvbatch = [list(range(i,i+1)) for i in range(0,21)]
 gp = gpobject.GPObject(kernel,noisekernel,hparams,[X,Y])
-gp,bic = gp.optimize(return_bic=True,bounds=bounds,verbose=2,opt_choice="cg",
+gp,bic = gp.optimize(return_bic=True,bounds=bounds,verbose=2,opt_choice="lbfgs",
                      beta_update_fn="FR",line_search_fn="goldstein")
 print(bic)
 xpred = np.linspace(0,1).reshape(-1,1)

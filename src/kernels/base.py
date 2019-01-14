@@ -38,7 +38,8 @@ class Constant(Kernel):
         self.dim = 0
         self.hyperparams = None
         self.initialized = False
-    
+        self.positives = [True]
+        
     def initialize(self,hyperparams):
         assert len(hyperparams) == self.nhyper
         self.hyperparams = hyperparams
@@ -67,6 +68,7 @@ class CompoundKernel(Kernel):
         self.nhyper = k1.nhyper + k2.nhyper
         self.hyperparams = None
         self.initialized = False
+        self.positives = k1.positives + k2.positives
         
     def initialize(self,hyperparams):
         hyper1 = hyperparams[:self.k1.nhyper]
