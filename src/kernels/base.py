@@ -57,7 +57,9 @@ class Constant(Kernel):
         if i == 0:
             return 1.0
 
-
+#==============================================================================
+# Compositions
+#==============================================================================
 class CompoundKernel(Kernel):
     """
         Compound kernel
@@ -87,10 +89,6 @@ class CompoundKernel(Kernel):
     def _get_hyperparams(self):
         return self.k1.hyperparams + self.k2.hyperparams
 
-
-#==============================================================================
-# Compositions
-#==============================================================================
 class Sum(CompoundKernel):
     """
         Sum kernel. k(x,y) = k1(x,y) + k2(x,y)
@@ -143,3 +141,26 @@ class TensorProd(CompoundKernel):
     def f(self,x,y):
         return self.k1.f(x[:,:self.nm],y[:,:self.nm]) * \
                self.k2.f(x[:,self.nm:],y[:,self.nm:])
+
+
+#    def __init__(self,k1,k2):
+#        self.k1 = k1
+#        self.k2 = k2
+#        self.nhyper = k1.nhyper + k2.nhyper
+#        self.hyperparams = None
+#        self.initialized = False
+#        self.positives = k1.positives + k2.positives
+#        
+#    def initialize(self,hyperparams):
+#        hyper1 = hyperparams[:self.k1.nhyper]
+#        hyper2 = hyperparams[self.k1.nhyper:]
+#        self.k1.initialize(hyper1)
+#        self.k2.initialize(hyper2)
+#        self.hyperparams = hyperparams
+#        self.initialized = True
+#    
+#    def reset(self):
+#        self.k1.reset()
+#        self.k2.reset()
+#        self.hyperparams = None
+#        self.initialized = False

@@ -16,7 +16,7 @@ Z = loadfile["Z"].reshape(-1,1)
 
 kernel = kernels.Constant()*kernels.IsoRBF(dim=2)
 noisekernel = kernels.IIDNoiseKernel()
-hparams = np.array([1.0,1.0,1.0])
+hparams = np.array([0.5,1.0,1.0])
 warpings={0:'log',1:'log',2:'log'}
 gp = gpobject.GPObject(kernel,noisekernel,hparams,[np.hstack([X,Y]),Z])
 gp = gp.optimize(bounds={},verbose=2,opt_choice="lbfgs",

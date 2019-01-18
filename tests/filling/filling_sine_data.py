@@ -75,8 +75,8 @@ frozen = []
 gp = gpobject.GPObject(kernel,noisekernel,hparams,(Xtrain,Ytrain))
 print(gp.showhparams())
 start_time = time.clock()
-gp = gp.optimize(option="B",verbose=2,num_starts = 1,
-                 bounds=bounds,line_search_fn = "goldstein")
+gp = gp.optimize(option="B",verbose=2,num_starts = 1,opt_choice="lbfgs",
+                 line_search_fn = "goldstein")
 end_time = time.clock()
 print(end_time - start_time)
 hparams = gp.showhparams()

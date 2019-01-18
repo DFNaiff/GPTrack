@@ -8,5 +8,6 @@ from .radial_kernels import IsoRBF,IsoMatern12,IsoMatern32,IsoMatern52,\
 from .periodic_kernels import PerRBF,PerMatern12,PerMatern32,PerMatern52
 from .noise_kernels import IIDNoiseKernel,MONoiseKernel
 from .special_kernels import ShiftedMO
-from .mo_kernels import SphericalCorr,CholeskyCorr
+from .mo_kernels import SphericalCorr,CholeskyCorr,LowRankCorr
 from .spectral_kernels import SpectralGaussian
+from .warpings import CompositionKernel,KswamyWarping

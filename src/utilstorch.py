@@ -34,6 +34,17 @@ def binary_function_matrix_ret(f,x1,x2):
     return K
 
 
+def cat_unsqueeze(L):
+    return torch.cat([x.unsqueeze(0) for x in L])
+
+
+def convert_to_tensor_float(x):
+    if type(x) != torch.Tensor:
+        return torch.tensor(x).float()
+    else:
+        return x.float()
+
+
 def hypersphere_param(n,thetas):
     #Here, n is the dimension of the underlying space (for instance, 
     #n = 2 is the parametrisation of the circle, 3 parametrization sphere)
@@ -61,3 +72,6 @@ def relation_array(f,x,X):
     X2 = torch.tensor(X).float()
     k = f(X1,X2)
     return k
+
+def nan_to_zero(x):
+    x[x != x] = 0

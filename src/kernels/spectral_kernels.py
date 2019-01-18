@@ -27,6 +27,6 @@ class SpectralGaussian(Kernel):
         self.initialized = False
     
     def f(self,x,y):
-        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)))
+        r = torch.sqrt(torch.sum((x - y)**2,1,keepdim=True))
         return torch.exp(-0.5*r**2/(self.hyperparams[0]**2))*\
                torch.cos(self.hyperparams[1]*r)

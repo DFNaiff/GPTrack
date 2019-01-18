@@ -1,8 +1,10 @@
-import torch
-from functools import reduce
-from torch.optim.optimizer import Optimizer
 from math import isinf
+from functools import reduce
 
+import torch
+from torch.optim.optimizer import Optimizer
+
+from .. import utilstorch
 #==============================================================================
 # This is a implementation of the LBFGS algorithm by Chang Yong-Oh,
 # not yet merged with PyTorch (although in theory it should be reviewed soon).
@@ -61,9 +63,11 @@ class LBFGS(Optimizer):
         return self._numel_cache
 
     def _gather_flat_grad(self):
-        return torch.cat(
-            tuple(param.grad.data.view(-1) for param in self._params), 0)
-
+        flat_grad = torch.cat(tuple(param.grad.data.view(-1) 
+                              for param in self._params), 0)
+#        utilstorch.nan_to_zero(flat_grad)
+        return flat_grad
+    
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:

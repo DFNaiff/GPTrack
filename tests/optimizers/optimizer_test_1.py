@@ -13,7 +13,7 @@ from src import optimizer
 x = torch.ones(3,requires_grad=True)
 def f(x):
     return torch.sum((x+1)**2)
-opt = optimizer.cg.CG([x],beta_update_fn = "FR",
+opt = optimizer.lbfgs.LBFGS([x],
                       line_search_fn = "backtracking")
 
 def closure():

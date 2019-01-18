@@ -91,8 +91,8 @@ class GPObject(object):
         """
         # TODO : assertions
         x,y = data
-        self.xdata = torch.tensor(x).float()
-        self.ydata = torch.tensor(y).float()
+        self.xdata = utilstorch.convert_to_tensor_float(x)
+        self.ydata = utilstorch.convert_to_tensor_float(y)
         self.numdata = self.xdata.shape[0]
         self.dimdata = self.xdata.shape[1]
         self.K = utilstorch.binary_function_matrix(self.kernel.f,
@@ -103,7 +103,7 @@ class GPObject(object):
         else:
             I = self.noisekernel.fdiag(self.xdata)
         self.K = self.K + I
-        self.U = torch.potrf(self.K)
+        self.U = torch.cholesky(self.K,upper=True)
         self._update_likelihood()
         self.is_empty = False
             
@@ -140,7 +140,7 @@ class GPObject(object):
     def _initialize_kernels(self,kernel,noisekernel,hparams):
         self.hparams = [None]*len(hparams)
         for i,_ in enumerate(hparams): #Convert to tensor
-            self.hparams[i] = torch.tensor(hparams[i])
+            self.hparams[i] = utilstorch.convert_to_tensor_float(hparams[i])
         self.nhkern = kernel.nhyper #Number of kernel hyperparams
         self.nhnoise = noisekernel.nhyper #Number of noise kernel hyperparams
         assert len(hparams) == self.nhkern + self.nhnoise #Check correct nhyper
@@ -160,7 +160,7 @@ class GPObject(object):
         """
             Calculate likelihood
         """
-        self.z = torch.trtrs(torch.tensor(self.ydata).float(),
+        self.z = torch.trtrs(self.ydata.float(),
                              self.U,transpose=True)[0]
         term1 = 0.5*torch.sum(self.z**2)
         term2 = torch.sum(torch.log(torch.diag(self.U)))
@@ -169,11 +169,11 @@ class GPObject(object):
 
     #Input conversion
     def _convert_input_single(self,x):
-        return torch.tensor(x).float()
-
+        return utilstorch.convert_to_tensor_float(x)
+            
     def _convert_input_batch(self,x):
-        return torch.tensor(x).float()
-    
+        return utilstorch.convert_to_tensor_float(x)
+
     #Print functions
     def showhparams(self):
         return [hp.item() for hp in self.hparams]

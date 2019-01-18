@@ -33,8 +33,8 @@ class IsoRBF(IsoRadKernel):
         super(IsoRBF,self).__init__(dim)
         
     def f(self,x,y):
-        r2 = torch.tensor(torch.sum((x - y)**2,1,keepdim=True) / \
-                (self.hyperparams[0]**2))
+        r2 = torch.sum((x - y)**2,1,keepdim=True) / \
+                (self.hyperparams[0]**2)
         return torch.exp(-0.5*r2)
 
 
@@ -47,8 +47,8 @@ class IsoMatern12(IsoRadKernel):
         super(IsoMatern12,self).__init__(dim)
         
     def f(self,x,y):
-        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
-                self.hyperparams[0])
+        r = torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
+                self.hyperparams[0]
         return torch.exp(-r)
 
 
@@ -61,8 +61,8 @@ class IsoMatern32(IsoRadKernel):
         super(IsoMatern32,self).__init__(dim)
         
     def f(self,x,y):
-        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
-                self.hyperparams[0])
+        r = torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
+                self.hyperparams[0]
         return (1 + SQRT3*r)*torch.exp(-SQRT3*r)
         
 
@@ -75,8 +75,8 @@ class IsoMatern52(IsoRadKernel):
         super(IsoMatern52,self).__init__(dim)
         
     def f(self,x,y):
-        r = torch.tensor(torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
-                self.hyperparams[0])
+        r = torch.sqrt(torch.sum((x - y)**2,1,keepdim=True)) / \
+                self.hyperparams[0]
         return (1 + SQRT5*r + 5.0/3*r**2)*torch.exp(-SQRT5*r)
 
 
@@ -91,8 +91,8 @@ class IsoRationalQuadratic(IsoRadKernel):
         self.positives = [True,True]
         
     def f(self,x,y):
-        r2 = torch.tensor(torch.sum((x - y)**2,1,keepdim=True) / \
-                (self.hyperparams[0]**2))
+        r2 = torch.sum((x - y)**2,1,keepdim=True) / \
+                (self.hyperparams[0]**2)
         return (1 + r2/(2*self.hyperparams[1]))**(-self.hyperparams[1])
 
 class ARDRadKernel(Kernel):
@@ -124,7 +124,7 @@ class ARDRBF(ARDRadKernel):
         super(ARDRBF,self).__init__(dim)
         
     def f(self,x,y):
-        r2 = torch.tensor(torch.sum((x - y)**2/(self.length_scales**2),1,keepdim=True))
+        r2 = torch.sum((x - y)**2/(self.length_scales**2),1,keepdim=True)
         return torch.exp(-0.5*r2)
 
 

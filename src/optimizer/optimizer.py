@@ -114,8 +114,6 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     
     #Prepare data and hyperparameters
     xdata,ydata = data
-    for i,_ in enumerate(hparams): #Convert to tensor
-        hparams[i] = torch.tensor(hparams[i])
     positive_list = kernel.positives + noisekernel.positives
     #Prepare list of frozen indexes
     frozenlist = [False]*len(hparams)
@@ -127,7 +125,6 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     #Prepare bounds
     bounds = []
     for i,_ in enumerate(hparams):
-        print(i,positive_list)
         if i in bounds_dict:
             b = bounds_dict[i]
             if b[0] != None:
@@ -171,12 +168,13 @@ def _optimize_single_start_b(kernel,noisekernel,hparams,
     optimizer.zero_grad()
     def closure(): #Closure function
         optimizer.zero_grad()
-        nll = _f(hparams_new)
         if verbose >= 2:
             print([h.item() for h in hparams_new])
+        nll = _f(hparams_new)
+        nll.backward(retain_graph=True)
+        if verbose >= 2:
             print(nll.item())
             print("-"*10)
-        nll.backward(retain_graph=True)
         return nll
     loss = optimizer.step(closure)
     #Unwarp and remove grad from parameters
@@ -234,7 +232,10 @@ class _LOOGPObject(object):
     def _initialize_kernels(self,kernel,noisekernel,hparams):
         self.hparams = [None]*len(hparams)
         for i,_ in enumerate(hparams): #Convert to tensor
-            self.hparams[i] = torch.tensor(hparams[i])
+            if type(hparams[i]) == torch.Tensor:
+                self.hparams[i] = hparams[i].clone()
+            else:
+                self.hparams[i] = torch.tensor(hparams[i])
         self.nhkern = kernel.nhyper #Number of kernel hyperparams
         self.nhnoise = noisekernel.nhyper #Number of noise kernel hyperparams
         assert len(hparams) == self.nhkern + self.nhnoise #Check correct nhyper
@@ -291,12 +292,18 @@ class _LOOGPObject(object):
             error += cv_single/self.numdata
         return error
         
-    #Input conversion
-    def _convert_input_single(self,x):
-        return torch.tensor(x).float()
-
-    def _convert_input_batch(self,x):
-        return torch.tensor(x).float()
+#    #Input conversion
+#    def _convert_input_single(self,x):
+#        if type(x) != torch.Tensor:
+#            return torch.tensor(x).float()
+#        else:
+#            return x.float()
+#            
+#    def _convert_input_batch(self,x):
+#        if type(x) != torch.Tensor:
+#            return torch.tensor(x).float()
+#        else:
+#            return x.float()
     
     #Print functions
     def showhparams(self):
@@ -326,8 +333,8 @@ class NLLGPObject(object):
         """
         # TODO : assertions
         x,y = data
-        self.xdata = torch.tensor(x).float()
-        self.ydata = torch.tensor(y).float()
+        self.xdata = utilstorch.convert_to_tensor_float(x)
+        self.ydata = utilstorch.convert_to_tensor_float(y)
         self.numdata = self.xdata.shape[0]
         self.dimdata = self.xdata.shape[1]
         self.K = utilstorch.binary_function_matrix(self.kernel.f,
@@ -338,14 +345,14 @@ class NLLGPObject(object):
         else:
             I = self.noisekernel.fdiag(self.xdata)
         self.K = self.K + I
-        self.U = torch.potrf(self.K)
+        self.U = torch.cholesky(self.K,upper=True)
         self._update_likelihood()
         self.is_empty = False
         
     def _initialize_kernels(self,kernel,noisekernel,hparams):
         self.hparams = [None]*len(hparams)
         for i,_ in enumerate(hparams): #Convert to tensor
-            self.hparams[i] = torch.tensor(hparams[i])
+            self.hparams[i] = utilstorch.convert_to_tensor_float(hparams[i])
         self.nhkern = kernel.nhyper #Number of kernel hyperparams
         self.nhnoise = noisekernel.nhyper #Number of noise kernel hyperparams
         assert len(hparams) == self.nhkern + self.nhnoise #Check correct nhyper
@@ -365,7 +372,7 @@ class NLLGPObject(object):
         """
             Calculate likelihood
         """
-        self.z = torch.trtrs(torch.tensor(self.ydata).float(),
+        self.z = torch.trtrs(self.ydata.float(),
                              self.U,transpose=True)[0]
         term1 = 0.5*torch.sum(self.z**2)
         term2 = torch.sum(torch.log(torch.diag(self.U)))

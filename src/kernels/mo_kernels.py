@@ -66,7 +66,6 @@ class CholeskyCorr(Kernel):
                         n
     """
     def __init__(self,nout):
-        raise NotImplementedError
         self.dim = 1
         self.nout = nout
         self.nhyper = nout*(nout+1)//2
@@ -82,9 +81,10 @@ class CholeskyCorr(Kernel):
         for i in range(1,self.nout+1):
             start_ind = utils.triangular(i-1)
             end_ind = utils.triangular(i)
-            diagtensor = torch.tensor(hyperparams[start_ind:end_ind])
+            diagtensor = utilstorch.cat_unsqueeze(hyperparams[start_ind:end_ind])
             U += torch.diag(diagtensor,self.nout-i)
         W = torch.matmul(U.transpose(1,0),U) # U.T*U
+
         self.W = W
         self.initialized = True
     
@@ -95,3 +95,36 @@ class CholeskyCorr(Kernel):
 
     def f(self,x,y):
         return self.W[x.long(),y.long()]
+
+
+class LowRankCorr(Kernel):
+    """
+        Description after
+    """
+    def __init__(self,nout,rank=1):
+        self.dim = 1
+        self.nout = nout
+        self.rank = rank
+        self.nhyper = rank*nout
+        self.hyperparams = None
+        self.W = None
+        self.initialized = False
+        self.positives = [True]*nout + [False]*(nout*(nout-1)//2)
+
+    def initialize(self,hyperparams):
+        assert len(hyperparams) == self.nhyper
+        self.hyperparams = hyperparams
+        U = utilstorch.cat_unsqueeze(self.hyperparams)
+        U = U.reshape(self.rank,self.nout)
+        W = torch.matmul(U.transpose(1,0),U)
+        self.W = W
+        self.initialized = True
+    
+    def reset(self):
+        self.hyperparams = None
+        self.W = None
+        self.initialized = False
+
+    def f(self,x,y):
+        return self.W[x.long(),y.long()]
+
