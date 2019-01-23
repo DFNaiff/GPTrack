@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+import torch
+
+from . import prior
 
 class Kernel(object):
     """
@@ -23,8 +26,39 @@ class Kernel(object):
             a list of tensor
         """
         raise NotImplementedError
+    
+    def set_priors(self,prior_dict={}):
+        """
+            prior dict must be in form {i:(prior_nm:str,prior_args:list)}
+            if i not in prior dict, then prior is:
+            normal(0,1), if not positive
+            lognormal(0,1), if positive
+            available priors:
+                normal,lognormal,gamma,
+                laplace,loglaplace,unif
+        """
+        self._prior_dict = dict()
+        for i in range(self.nhyper):
+            if i in prior_dict:
+                self._prior_dict[i] = prior_dict[i]
+            else:
+                if self.positives[i]:
+                    self._prior_dict[i] = ("lognormal",(0.0,1.0))
+                else:
+                    self._prior_dict[i] = ("normal",(0.0,1.0))
+    
+    def ln_pdf(self):
+        if not hasattr(self,"_prior_dict"):
+            raise ValueError("No priors")
+        else:
+            res = torch.tensor(0.0)
+            for i,h in enumerate(self.hyperparams):
+                name,args = self._prior_dict[i]
+                res += prior.ln_pdf(h,name,args)
+            return res
 
-
+    def has_prior(self):
+        return hasattr(self,"_prior_dict")
 #==============================================================================
 # Constant kernel
 #==============================================================================

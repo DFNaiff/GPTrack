@@ -337,15 +337,15 @@ class NLLGPObject(object):
         self.ydata = utilstorch.convert_to_tensor_float(y)
         self.numdata = self.xdata.shape[0]
         self.dimdata = self.xdata.shape[1]
-        self.K = utilstorch.binary_function_matrix(self.kernel.f,
+        K = utilstorch.binary_function_matrix(self.kernel.f,
                                                    self.xdata)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
             Idiag = self.noisekernel.fdiag(self.xdata)
             I = torch.diag(Idiag)
         else:
             I = self.noisekernel.fdiag(self.xdata)
-        self.K = self.K + I
-        self.U = torch.cholesky(self.K,upper=True)
+        K = K + I
+        self.U = torch.cholesky(K,upper=True)
         self._update_likelihood()
         self.is_empty = False
         
@@ -383,7 +383,9 @@ class NLLGPObject(object):
     def showhparams(self):
         return [hp.item() for hp in self.hparams]
 
-
+    def posteriori(self):
+        return self.likelihood + self.kernel.ln_pdf() + \
+               self.noisekernel.ln_pdf()
 #==============================================================================
 # AUXILIARY FUNCTIONS
 #==============================================================================

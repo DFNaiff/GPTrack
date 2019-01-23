@@ -15,7 +15,8 @@ LOG2PI = float(np.log(2*np.pi))
 
 #TODO : You may be holding K on memory without needing
 class GPObject(object):
-    def __init__(self,kernel,noise_kernel,hparams,data,
+    #Base functions
+    def __init__(self,kernel,noise_kernel,hparams,data=None,
                       **kwargs):
         """
             kernel : kernel of the GP
@@ -29,9 +30,13 @@ class GPObject(object):
         """
         self.gpmean = kwargs.get("gpmean",0.0)
         self._initialize_kernels(kernel,noise_kernel,hparams)
-        self.change_data(data)
-    
+        if data:
+            self.change_data(data)
+        else:
+            self.empty = True
+
     def predict(self,x,**kwargs):
+        if self.empty: raise ValueError("GP has no data")
         getvar = kwargs.get("getvar",True)
         return_as_numpy = kwargs.get("return_as_numpy",True)
         retdiag = kwargs.get("retdiag",True)
@@ -49,6 +54,7 @@ class GPObject(object):
         """
             Calculate mean(x),var(x)
         """
+        if self.empty: raise ValueError("GP has no data")
         # TODO : add efficient update of r
         x = self._convert_input_single(x)
         kx = utilstorch.relation_array(self.kernel.f,x,self.xdata)
@@ -68,6 +74,7 @@ class GPObject(object):
         """
             Calculate mean(x),var(x)
         """
+        if self.empty: raise ValueError("GP has no data")
         # TODO : add efficient update of r
         x = self._convert_input_batch(x)
         kx = utilstorch.binary_function_matrix_ret(self.kernel.f,
@@ -95,17 +102,18 @@ class GPObject(object):
         self.ydata = utilstorch.convert_to_tensor_float(y)
         self.numdata = self.xdata.shape[0]
         self.dimdata = self.xdata.shape[1]
-        self.K = utilstorch.binary_function_matrix(self.kernel.f,
+        #TIP : Back to self.K if needed
+        K = utilstorch.binary_function_matrix(self.kernel.f,
                                                    self.xdata)
         if self.noisekernel.is_diagonal: #K(X,X) + sigma2*I
             Idiag = self.noisekernel.fdiag(self.xdata)
             I = torch.diag(Idiag)
         else:
             I = self.noisekernel.fdiag(self.xdata)
-        self.K = self.K + I
-        self.U = torch.cholesky(self.K,upper=True)
+        K = K + I
+        self.U = torch.cholesky(K,upper=True)
         self._update_likelihood()
-        self.is_empty = False
+        self.empty = False
             
     def optimize(self,option="B",return_bic=False,**kwargs):
         """
@@ -127,6 +135,7 @@ class GPObject(object):
                 GPObject with new parameters.
                 Bayes Information Criterion calculated
         """
+        if self.empty: raise ValueError("GP has no data")
         hparams_new,bic =  gpoptimizer.optimize(self.kernel,self.noisekernel,
                          self.hparams,(self.xdata,self.ydata),
                          option,**kwargs)
@@ -137,6 +146,44 @@ class GPObject(object):
         else:
             return gpnew
 
+    #Updating functions    
+    def update_batch(self,new_data_batch):
+        """
+            new data : (xdata,ydata) tuple, where xdata is a 
+                    (nsamples,nfeatures)-array and 
+                    ydata is a (nsamples,1)-array
+        """
+        #TODO : Assertions
+        raise NotImplementedError
+        if self.empty:
+            self.change_data(new_data_batch)
+        else:
+            xnew,ynew = new_data_batch
+            xnew = utilstorch.convert_to_tensor_float(xnew)
+            ynew = utilstorch.convert_to_tensor_float(ynew)
+            numnew = xnew.shape[0]
+            self.xdata = torch.cat([self.xdata,xnew],0)
+            self.ydata = torch.cat([self.ydata,ynew],0)
+            self.numdata = self.xdata.shape[0]
+            self.dimdata = self.xdata.shape[1]
+            return numnew
+#            num_new = len(x_t)
+#            self.numdata = self.numdata + num_new
+#            V = np.vstack([utils.relation_array(self.cov,x_ti,self.xdata) 
+#                           for x_ti in x_t]).transpose() #K(Xnew,Xold)
+#            C = utils.binary_function_matrix(self.cov,x_t) #K(Xnew,Xnew)
+#            if self.noisekernel.is_diagonal: #K(Xnew,Xnew) + sigma^2*I
+#                I = np.diag([self.noisecov(xx,xx) for xx in x_t])
+#                C = C + I
+#            else:
+#                raise NotImplementedError
+#            self.K = utilsla.expand_symmetric_with_matrix(self.K,V,C) #K
+#            self.U = utilsla.expand_cholesky_with_matrix(self.U,V,C) #cholesky factor
+#            self.xdata += x_t
+#            self.ydata = np.hstack([self.ydata,np.array(z_t)])
+#            self._update_likelihood()
+
+    #Auxiliary functions
     def _initialize_kernels(self,kernel,noisekernel,hparams):
         self.hparams = [None]*len(hparams)
         for i,_ in enumerate(hparams): #Convert to tensor
@@ -177,3 +224,8 @@ class GPObject(object):
     #Print functions
     def showhparams(self):
         return [hp.item() for hp in self.hparams]
+        
+    #Other
+    def logposteriori(self):
+        return self.loglikelihood + self.kernel.ln_pdf() + \
+               self.noisekernel.ln_pdf()
